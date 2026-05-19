@@ -1,0 +1,4 @@
+const timeclockRouter = require('./routes/timeclock');
+app.use('/api/timeclock', timeclockRouter);
+
+
