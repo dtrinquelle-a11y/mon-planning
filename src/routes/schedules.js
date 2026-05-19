@@ -206,6 +206,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
-git add .
-git commit -m "test"
-git push
+
