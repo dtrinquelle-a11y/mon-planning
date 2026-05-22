@@ -135,8 +135,7 @@ router.post('/', async (req, res) => {
 // PATCH /api/schedules/:id
 // Modifier un créneau (glisser-déposer)
 router.patch('/:id', async (req, res) => {
-  const allowed = ['start_time', 'end_time', 'shift_type',
-                   'break_minutes', 'note', 'work_date'];
+  const allowed = ['start_time', 'end_time', 'shift_type', 'break_minutes', 'note', 'work_date', 'employee_id'];
   const updates = Object.keys(req.body).filter(k => allowed.includes(k));
 
   if (updates.length === 0) {
