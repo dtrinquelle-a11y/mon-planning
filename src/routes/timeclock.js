@@ -41,7 +41,7 @@ router.get('/today', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        t.id, t.action, t.scanned_at, t.is_late, t.late_minutes,
+        t.id, t.action, t.scanned_at, t.is_late, t.late_minutes, t.geo_valid, t.latitude, t.longitude, t.employee_id,
         e.first_name, e.last_name, e.role
       FROM timeclock t
       JOIN employees e ON t.employee_id = e.id
