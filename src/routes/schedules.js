@@ -1,10 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { sendPlanningPublished, sendShiftModified } = require('../email');
 
+// GET /api/schedules?week=2026-05-18
 router.get('/', async (req, res) => {
   const { week } = req.query;
-  if (!week) return res.status(400).json({ error: 'Paramètre week requis' });
+  if (!week) return res.status(400).json({ error: 'Parametre week requis' });
   try {
     const result = await pool.query(`
       SELECT s.*, e.id AS employee_id, e.first_name, e.last_name, e.role,
@@ -19,6 +21,7 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/schedules
 router.post('/', async (req, res) => {
   const { employee_id, work_date, start_time, end_time, shift_type, break_minutes, note } = req.body;
   if (!employee_id || !work_date || !start_time || !end_time || !shift_type)
@@ -32,38 +35,91 @@ router.post('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// PATCH /api/schedules/:id
 router.patch('/:id', async (req, res) => {
-  const allowed = ['start_time', 'end_time', 'shift_type', 'break_minutes', 'note', 'work_date'];
+  const allowed = ['start_time', 'end_time', 'shift_type', 'break_minutes', 'note', 'work_date', 'employee_id'];
   const updates = Object.keys(req.body).filter(k => allowed.includes(k));
   if (!updates.length) return res.status(400).json({ error: 'Aucun champ valide' });
   const setClause = updates.map((k, i) => `${k} = $${i + 1}`).join(', ');
   try {
+    // Recupere l'ancien creneau pour la notification
+    const old = await pool.query(
+      'SELECT s.*, e.email, e.first_name, e.last_name FROM schedules s JOIN employees e ON s.employee_id = e.id WHERE s.id = $1',
+      [req.params.id]
+    );
     const result = await pool.query(
       `UPDATE schedules SET ${setClause} WHERE id = $${updates.length + 1} RETURNING *`,
       [...updates.map(k => req.body[k]), req.params.id]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Créneau introuvable' });
+    if (!result.rows[0]) return res.status(404).json({ error: 'Creneau introuvable' });
+
+    // Notification email si horaires modifies et creneau publie
+    if (old.rows[0] && old.rows[0].is_published && old.rows[0].email &&
+        (req.body.start_time || req.body.end_time)) {
+      sendShiftModified({
+        to: old.rows[0].email,
+        employeeName: old.rows[0].first_name + ' ' + old.rows[0].last_name,
+        date: old.rows[0].work_date.toISOString().slice(0, 10),
+        oldStart: old.rows[0].start_time,
+        oldEnd: old.rows[0].end_time,
+        newStart: req.body.start_time || old.rows[0].start_time,
+        newEnd: req.body.end_time || old.rows[0].end_time,
+        note: result.rows[0].note,
+      });
+    }
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/schedules/publish
 router.post('/publish', async (req, res) => {
   const { week } = req.body;
-  if (!week) return res.status(400).json({ error: 'Paramètre week requis' });
+  if (!week) return res.status(400).json({ error: 'Parametre week requis' });
   try {
+    // Recupere les creneaux avant publication pour les emails
+    const toNotify = await pool.query(`
+      SELECT s.*, e.email, e.first_name, e.last_name
+      FROM schedules s
+      JOIN employees e ON s.employee_id = e.id
+      WHERE s.work_date >= $1::date
+        AND s.work_date < $1::date + INTERVAL '7 days'
+        AND s.is_published = false
+        AND e.email IS NOT NULL
+    `, [week]);
+
     const result = await pool.query(`
       UPDATE schedules SET is_published = true
-      WHERE work_date >= $1::date AND work_date < $1::date + INTERVAL '7 days' AND is_published = false
-      RETURNING id
+      WHERE work_date >= $1::date AND work_date < $1::date + INTERVAL '7 days'
+      AND is_published = false RETURNING id
     `, [week]);
-    res.json({ success: true, published: result.rowCount });
+
+    // Groupe les creneaux par salarie et envoie un email par salarie
+    const byEmp = {};
+    toNotify.rows.forEach(s => {
+      if (!byEmp[s.employee_id]) {
+        byEmp[s.employee_id] = { email: s.email, name: s.first_name + ' ' + s.last_name, count: 0 };
+      }
+      byEmp[s.employee_id].count++;
+    });
+
+    Object.values(byEmp).forEach(emp => {
+      sendPlanningPublished({
+        to: emp.email,
+        employeeName: emp.name,
+        weekStart: week,
+        shiftsCount: emp.count,
+      });
+    });
+
+    res.json({ success: true, published: result.rowCount, notified: Object.keys(byEmp).length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// DELETE /api/schedules/:id
 router.delete('/:id', async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM schedules WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows[0]) return res.status(404).json({ error: 'Créneau introuvable' });
+    if (!result.rows[0]) return res.status(404).json({ error: 'Creneau introuvable' });
     res.json({ success: true, deleted_id: req.params.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
