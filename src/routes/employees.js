@@ -10,7 +10,7 @@ router.get('/', async (req, res) => {
       SELECT
         e.id, e.first_name, e.last_name, e.role,
         e.email, e.phone, e.contract_hours, e.contract_type,
-        e.hire_date, e.is_active, e.service,
+        e.hire_date, e.is_active, e.service, e.services_secondaires,
         ROUND(m.worked_hours, 2) AS heures_travaillees,
         CASE
           WHEN m.worked_hours > m.threshold_25 THEN 'majoration_50'
