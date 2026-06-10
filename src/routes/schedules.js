@@ -21,6 +21,52 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/schedules/monthly-summary?month=2026-06
+router.get('/monthly-summary', async (req, res) => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const monthStart = month + '-01';
+  try {
+    // Heures planifiées par salarié ce mois
+    const planned = await pool.query(`
+      SELECT 
+        s.employee_id,
+        ROUND(SUM(EXTRACT(EPOCH FROM (s.end_time - s.start_time)) / 3600 - s.break_minutes / 60.0)::numeric, 2) AS heures_planifiees
+      FROM schedules s
+      WHERE s.work_date >= $1::date
+        AND s.work_date < $1::date + INTERVAL '1 month'
+      GROUP BY s.employee_id
+    `, [monthStart]);
+
+    // Heures réalisées par salarié ce mois (via timeclock)
+    const worked = await pool.query(`
+      SELECT 
+        t.employee_id,
+        ROUND(SUM(t.worked_minutes) / 60.0, 2) AS heures_realisees
+      FROM timeclock t
+      WHERE t.action = 'out'
+        AND t.scanned_at >= $1::date
+        AND t.scanned_at < $1::date + INTERVAL '1 month'
+        AND t.worked_minutes IS NOT NULL
+      GROUP BY t.employee_id
+    `, [monthStart]);
+
+    // Fusionner les deux résultats
+    const summary = {};
+    planned.rows.forEach(r => {
+      summary[r.employee_id] = { heures_planifiees: parseFloat(r.heures_planifiees), heures_realisees: 0 };
+    });
+    worked.rows.forEach(r => {
+      if (summary[r.employee_id]) {
+        summary[r.employee_id].heures_realisees = parseFloat(r.heures_realisees);
+      } else {
+        summary[r.employee_id] = { heures_planifiees: 0, heures_realisees: parseFloat(r.heures_realisees) };
+      }
+    });
+
+    res.json(summary);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/schedules
 router.post('/', async (req, res) => {
   const { employee_id, work_date, start_time, end_time, shift_type, break_minutes, note } = req.body;
@@ -42,7 +88,6 @@ router.patch('/:id', async (req, res) => {
   if (!updates.length) return res.status(400).json({ error: 'Aucun champ valide' });
   const setClause = updates.map((k, i) => `${k} = $${i + 1}`).join(', ');
   try {
-    // Recupere l'ancien creneau pour la notification
     const old = await pool.query(
       'SELECT s.*, e.email, e.first_name, e.last_name FROM schedules s JOIN employees e ON s.employee_id = e.id WHERE s.id = $1',
       [req.params.id]
@@ -52,10 +97,7 @@ router.patch('/:id', async (req, res) => {
       [...updates.map(k => req.body[k]), req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Creneau introuvable' });
-
-    // Notification email si horaires modifies et creneau publie
-    if (old.rows[0] && old.rows[0].is_published && old.rows[0].email &&
-        (req.body.start_time || req.body.end_time)) {
+    if (old.rows[0] && old.rows[0].is_published && old.rows[0].email && (req.body.start_time || req.body.end_time)) {
       sendShiftModified({
         to: old.rows[0].email,
         employeeName: old.rows[0].first_name + ' ' + old.rows[0].last_name,
@@ -76,41 +118,25 @@ router.post('/publish', async (req, res) => {
   const { week } = req.body;
   if (!week) return res.status(400).json({ error: 'Parametre week requis' });
   try {
-    // Recupere les creneaux avant publication pour les emails
     const toNotify = await pool.query(`
       SELECT s.*, e.email, e.first_name, e.last_name
-      FROM schedules s
-      JOIN employees e ON s.employee_id = e.id
-      WHERE s.work_date >= $1::date
-        AND s.work_date < $1::date + INTERVAL '7 days'
-        AND s.is_published = false
-        AND e.email IS NOT NULL
+      FROM schedules s JOIN employees e ON s.employee_id = e.id
+      WHERE s.work_date >= $1::date AND s.work_date < $1::date + INTERVAL '7 days'
+        AND s.is_published = false AND e.email IS NOT NULL
     `, [week]);
-
     const result = await pool.query(`
       UPDATE schedules SET is_published = true
       WHERE work_date >= $1::date AND work_date < $1::date + INTERVAL '7 days'
       AND is_published = false RETURNING id
     `, [week]);
-
-    // Groupe les creneaux par salarie et envoie un email par salarie
     const byEmp = {};
     toNotify.rows.forEach(s => {
-      if (!byEmp[s.employee_id]) {
-        byEmp[s.employee_id] = { email: s.email, name: s.first_name + ' ' + s.last_name, count: 0 };
-      }
+      if (!byEmp[s.employee_id]) byEmp[s.employee_id] = { email: s.email, name: s.first_name + ' ' + s.last_name, count: 0 };
       byEmp[s.employee_id].count++;
     });
-
     Object.values(byEmp).forEach(emp => {
-      sendPlanningPublished({
-        to: emp.email,
-        employeeName: emp.name,
-        weekStart: week,
-        shiftsCount: emp.count,
-      });
+      sendPlanningPublished({ to: emp.email, employeeName: emp.name, weekStart: week, shiftsCount: emp.count });
     });
-
     res.json({ success: true, published: result.rowCount, notified: Object.keys(byEmp).length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
