@@ -37,17 +37,19 @@ router.get('/monthly-summary', async (req, res) => {
       GROUP BY s.employee_id
     `, [monthStart]);
 
-    // Heures réalisées par salarié ce mois (via timeclock)
+    // Heures réalisées par salarié ce mois (appariement in/out)
     const worked = await pool.query(`
       SELECT 
-        t.employee_id,
-        ROUND(SUM(t.worked_minutes) / 60.0, 2) AS heures_realisees
-      FROM timeclock t
-      WHERE t.action = 'out'
-        AND t.scanned_at >= $1::date
-        AND t.scanned_at < $1::date + INTERVAL '1 month'
-        AND t.worked_minutes IS NOT NULL
-      GROUP BY t.employee_id
+        t_in.employee_id,
+        ROUND(SUM(EXTRACT(EPOCH FROM (t_out.scanned_at - t_in.scanned_at)) / 3600)::numeric, 2) AS heures_realisees
+      FROM timeclock t_in
+      JOIN timeclock t_out ON t_out.employee_id = t_in.employee_id
+        AND t_out.action = 'out'
+        AND DATE(t_out.scanned_at) = DATE(t_in.scanned_at)
+      WHERE t_in.action = 'in'
+        AND t_in.scanned_at >= $1::date
+        AND t_in.scanned_at < $1::date + INTERVAL '1 month'
+      GROUP BY t_in.employee_id
     `, [monthStart]);
 
     // Fusionner les deux résultats
