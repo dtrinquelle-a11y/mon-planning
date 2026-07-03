@@ -10,10 +10,12 @@ app.use(express.json());
 const employeesRouter = require('./routes/employees');
 const schedulesRouter = require('./routes/schedules');
 const timeclockRouter = require('./routes/timeclock');
+const settingsRouter = require('./routes/settings');
 
 app.use('/api/employees', employeesRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/timeclock', timeclockRouter);
+app.use('/api/settings', settingsRouter);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
