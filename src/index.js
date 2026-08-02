@@ -1,24 +1,53 @@
 const express = require('express');
 const cors = require('cors');
-const { pool } = require('./db');
+const { pool, supabase } = require('./db');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // 10mb pour les photos base64
 
 // Routes
 const employeesRouter = require('./routes/employees');
 const schedulesRouter = require('./routes/schedules');
 const timeclockRouter = require('./routes/timeclock');
-const settingsRouter = require('./routes/settings');
 
 app.use('/api/employees', employeesRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/timeclock', timeclockRouter);
-app.use('/api/settings', settingsRouter);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// GET /api/settings/:key
+app.get('/api/settings/:key', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', req.params.key).single();
+    if (error) throw error;
+    res.json(data?.value || {});
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/settings
+app.get('/api/settings', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('app_settings').select('*');
+    if (error) throw error;
+    const map = {};
+    (data || []).forEach(s => { map[s.key] = s.value; });
+    res.json(map);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /api/settings/:key
+app.patch('/api/settings/:key', async (req, res) => {
+  try {
+    const { error } = await supabase.from('app_settings')
+      .update({ value: req.body, updated_at: new Date().toISOString() })
+      .eq('key', req.params.key);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // Ping DB toutes les 9 minutes pour éviter mise en pause Supabase
 setInterval(async () => {
@@ -33,6 +62,5 @@ setInterval(async () => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log('Serveur Planning HPA sur port ' + PORT);
-  // Premier ping immédiat au démarrage
   pool.query('SELECT 1').then(() => console.log('[Ping] DB connectée')).catch(e => console.error('[Ping] Erreur init:', e.message));
 });
