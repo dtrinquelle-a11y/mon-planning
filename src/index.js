@@ -20,12 +20,18 @@ app.use('/api/timeclock', timeclockRouter);
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // GET /api/settings/:key
-app.get('/api/settings/:key', async (req, res) => {
+app.get('/api/settings', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', req.params.key).single();
+    console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'OK' : 'MANQUANT');
+    const { data, error } = await supabase.from('app_settings').select('*');
     if (error) throw error;
-    res.json(data?.value || {});
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const map = {};
+    (data || []).forEach(s => { map[s.key] = s.value; });
+    res.json(map);
+  } catch (err) { 
+    console.error('Erreur settings:', err.message);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // GET /api/settings
