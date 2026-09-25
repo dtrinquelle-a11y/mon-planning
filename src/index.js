@@ -1,66 +1,35 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { pool, supabase } = require('./db');
+const { pool, TZ } = require('./db');
+const { requireAuth } = require('./auth');
 
 const app = express();
-app.use(cors());
+// CORS_ORIGIN : liste d'origines autorisees separees par des virgules (toutes si absent)
+const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : '*';
+app.use(cors({ origin: corsOrigins }));
 app.use(express.json({ limit: '10mb' })); // 10mb pour les photos base64
 
 // Routes
 const employeesRouter = require('./routes/employees');
 const schedulesRouter = require('./routes/schedules');
 const timeclockRouter = require('./routes/timeclock');
+const settingsRouter = require('./routes/settings');
 
+// Health check (public)
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+app.use('/api', requireAuth);
 app.use('/api/employees', employeesRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/timeclock', timeclockRouter);
-
-// Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-
-// GET /api/settings/:key
-app.get('/api/settings', async (req, res) => {
-  try {
-    console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'OK' : 'MANQUANT');
-    const { data, error } = await supabase.from('app_settings').select('*');
-    if (error) throw error;
-    const map = {};
-    (data || []).forEach(s => { map[s.key] = s.value; });
-    res.json(map);
-  } catch (err) { 
-    console.error('Erreur settings:', err.message);
-    res.status(500).json({ error: err.message }); 
-  }
-});
-
-// GET /api/settings
-app.get('/api/settings', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('app_settings').select('*');
-    if (error) throw error;
-    const map = {};
-    (data || []).forEach(s => { map[s.key] = s.value; });
-    res.json(map);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// PATCH /api/settings/:key
-app.patch('/api/settings/:key', async (req, res) => {
-  try {
-    const { error } = await supabase.from('app_settings')
-      .update({ value: req.body, updated_at: new Date().toISOString() })
-      .eq('key', req.params.key);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+app.use('/api/settings', settingsRouter);
 
 // Ping DB toutes les 9 minutes pour éviter mise en pause Supabase
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
-    console.log('[Ping] DB ok -', new Date().toLocaleTimeString('fr-FR'));
+    console.log('[Ping] DB ok -', new Date().toLocaleTimeString('fr-FR', { timeZone: TZ }));
   } catch (e) {
     console.error('[Ping] DB error:', e.message);
   }

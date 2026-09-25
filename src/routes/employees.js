@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db');
+const { pool, TODAY_SQL } = require('../db');
 // GET /api/employees
 router.get('/', async (req, res) => {
   try {
@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
               END AS statut_modulation
        FROM employees e
        LEFT JOIN modulation_counter m ON m.employee_id = e.id
-         AND m.period_start <= CURRENT_DATE AND m.period_end >= CURRENT_DATE
+         AND m.period_start <= ${TODAY_SQL} AND m.period_end >= ${TODAY_SQL}
        ORDER BY e.last_name`
     );
     res.json(result.rows);

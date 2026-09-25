@@ -1,7 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db');
+const { pool, TZ } = require('../db');
 const { sendPlanningPublished, sendShiftModified } = require('../email');
+
+// pg renvoie les colonnes DATE en Date a minuit heure locale : on relit les composantes locales
+function formatDate(d) {
+  if (!(d instanceof Date)) return String(d);
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
 
 // GET /api/schedules?week=2026-05-18
 router.get('/', async (req, res) => {
@@ -37,19 +44,28 @@ router.get('/monthly-summary', async (req, res) => {
       GROUP BY s.employee_id
     `, [monthStart]);
 
-    // Heures réalisées par salarié ce mois (appariement in/out)
+    // Heures réalisées par salarié ce mois : chaque 'in' est apparié au pointage suivant s'il s'agit d'un 'out'
     const worked = await pool.query(`
-      SELECT 
-        t_in.employee_id,
-        ROUND(SUM(EXTRACT(EPOCH FROM (t_out.scanned_at - t_in.scanned_at)) / 3600)::numeric, 2) AS heures_realisees
-      FROM timeclock t_in
-      JOIN timeclock t_out ON t_out.employee_id = t_in.employee_id
-        AND t_out.action = 'out'
-        AND DATE(t_out.scanned_at) = DATE(t_in.scanned_at)
-      WHERE t_in.action = 'in'
-        AND t_in.scanned_at >= $1::date
-        AND t_in.scanned_at < $1::date + INTERVAL '1 month'
-      GROUP BY t_in.employee_id
+      WITH scans AS (
+        SELECT employee_id, action, scanned_at,
+          scanned_at AT TIME ZONE '${TZ}' AS local_at,
+          LEAD(action) OVER w AS next_action,
+          LEAD(scanned_at) OVER w AS next_at
+        FROM timeclock
+        WHERE scanned_at AT TIME ZONE '${TZ}' >= $1::date - INTERVAL '1 day'
+          AND scanned_at AT TIME ZONE '${TZ}' < $1::date + INTERVAL '1 month 1 day'
+        WINDOW w AS (PARTITION BY employee_id ORDER BY scanned_at)
+      )
+      SELECT
+        employee_id,
+        ROUND(SUM(EXTRACT(EPOCH FROM (next_at - scanned_at)) / 3600)::numeric, 2) AS heures_realisees
+      FROM scans
+      WHERE action = 'in'
+        AND next_action = 'out'
+        AND next_at - scanned_at < INTERVAL '24 hours'
+        AND local_at >= $1::date
+        AND local_at < $1::date + INTERVAL '1 month'
+      GROUP BY employee_id
     `, [monthStart]);
 
     // Fusionner les deux résultats
@@ -99,16 +115,19 @@ router.patch('/:id', async (req, res) => {
       [...updates.map(k => req.body[k]), req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Creneau introuvable' });
-    if (old.rows[0] && old.rows[0].is_published && old.rows[0].email && (req.body.start_time || req.body.end_time)) {
+    const before = old.rows[0];
+    const after = result.rows[0];
+    const timeChanged = before && (before.start_time !== after.start_time || before.end_time !== after.end_time);
+    if (timeChanged && before.is_published && before.email) {
       sendShiftModified({
-        to: old.rows[0].email,
-        employeeName: old.rows[0].first_name + ' ' + old.rows[0].last_name,
-        date: old.rows[0].work_date.toISOString().slice(0, 10),
-        oldStart: old.rows[0].start_time,
-        oldEnd: old.rows[0].end_time,
-        newStart: req.body.start_time || old.rows[0].start_time,
-        newEnd: req.body.end_time || old.rows[0].end_time,
-        note: result.rows[0].note,
+        to: before.email,
+        employeeName: before.first_name + ' ' + before.last_name,
+        date: formatDate(after.work_date),
+        oldStart: before.start_time,
+        oldEnd: before.end_time,
+        newStart: after.start_time,
+        newEnd: after.end_time,
+        note: after.note,
       });
     }
     res.json(result.rows[0]);

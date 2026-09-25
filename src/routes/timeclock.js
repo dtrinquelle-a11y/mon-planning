@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db');
+const { pool, TZ, TODAY_SQL } = require('../db');
 const { sendGeoAlert } = require('../email');
 
 // POST /api/timeclock/scan
@@ -17,7 +17,7 @@ router.post('/scan', async (req, res) => {
     const data = result.rows[0].resultat;
 
     // Sauvegarde geo si fournie
-    if (latitude && longitude) {
+    if (latitude != null && longitude != null) {
       await pool.query(
         'UPDATE timeclock SET latitude=$1, longitude=$2, geo_valid=$3 WHERE id=$4',
         [latitude, longitude, geo_valid || false, data.scan_id]
@@ -25,7 +25,7 @@ router.post('/scan', async (req, res) => {
     }
 
     // Alerte geo si hors perimetre
-    if (latitude && geo_valid === false) {
+    if (latitude != null && geo_valid === false) {
       const emp = await pool.query('SELECT first_name, last_name FROM employees WHERE id=$1', [employee_id]);
       const manager = await pool.query(`
         SELECT e.email FROM employees e
@@ -34,7 +34,7 @@ router.post('/scan', async (req, res) => {
       `);
       if (manager.rows[0]?.email && emp.rows[0]) {
         const dist = req.body.distance || '?';
-        const time = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        const time = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
         sendGeoAlert({
           managerEmail: manager.rows[0].email,
           employeeName: emp.rows[0].first_name + ' ' + emp.rows[0].last_name,
@@ -64,7 +64,7 @@ router.get('/today', async (req, res) => {
              e.first_name, e.last_name, e.role
       FROM timeclock t
       JOIN employees e ON t.employee_id = e.id
-      WHERE t.scanned_at::date = CURRENT_DATE
+      WHERE (t.scanned_at AT TIME ZONE '${TZ}')::date = ${TODAY_SQL}
       ORDER BY t.scanned_at DESC
     `);
     res.json(result.rows);
@@ -81,7 +81,7 @@ router.get('/presence', async (req, res) => {
         CASE WHEN t.action = 'in' THEN true ELSE false END AS en_poste
       FROM timeclock t
       JOIN employees e ON t.employee_id = e.id
-      WHERE t.scanned_at::date = CURRENT_DATE
+      WHERE (t.scanned_at AT TIME ZONE '${TZ}')::date = ${TODAY_SQL}
       ORDER BY t.employee_id, t.scanned_at DESC
     `);
     res.json(result.rows);
@@ -107,8 +107,8 @@ router.get('/modulation/:employee_id', async (req, res) => {
       FROM modulation_counter m
       JOIN employees e ON m.employee_id = e.id
       WHERE m.employee_id = $1
-        AND m.period_start <= CURRENT_DATE
-        AND m.period_end >= CURRENT_DATE
+        AND m.period_start <= ${TODAY_SQL}
+        AND m.period_end >= ${TODAY_SQL}
     `, [req.params.employee_id]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Compteur introuvable' });
     res.json(result.rows[0]);
@@ -130,7 +130,7 @@ router.get('/modulation', async (req, res) => {
         END AS statut
       FROM modulation_counter m
       JOIN employees e ON m.employee_id = e.id
-      WHERE m.period_start <= CURRENT_DATE AND m.period_end >= CURRENT_DATE
+      WHERE m.period_start <= ${TODAY_SQL} AND m.period_end >= ${TODAY_SQL}
       ORDER BY e.last_name
     `);
     res.json(result.rows);
