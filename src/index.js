@@ -15,6 +15,7 @@ const employeesRouter = require('./routes/employees');
 const schedulesRouter = require('./routes/schedules');
 const timeclockRouter = require('./routes/timeclock');
 const settingsRouter = require('./routes/settings');
+const documentsRouter = require('./routes/documents');
 
 // Health check (public)
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -24,6 +25,7 @@ app.use('/api/employees', employeesRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/timeclock', timeclockRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/documents', documentsRouter);
 
 // Ping DB toutes les 9 minutes pour éviter mise en pause Supabase
 setInterval(async () => {

@@ -144,7 +144,25 @@ function sendEchangeRequest({ managerEmail, employeeName, date, shiftTime, messa
   });
 }
 
+// Email : nouveau document disponible (bulletin de paie, contrat, attestation...)
+function sendDocumentAvailable({ to, employeeName, docLabel }) {
+  return send('document disponible', {
+    to,
+    subject: 'Nouveau document disponible : ' + docLabel,
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>Un nouveau document a ete depose dans votre espace :</p>
+          <div class="highlight"><strong>${esc(docLabel)}</strong></div>
+          <p>Retrouvez-le dans l'application, onglet <strong>Mes documents</strong>.</p>
+          <a href="${APP_URL}" class="btn">Voir mes documents</a>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendDocumentAvailable,
   sendPlanningPublished,
   sendShiftModified,
   sendGeoAlert,
