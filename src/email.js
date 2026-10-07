@@ -197,7 +197,49 @@ function sendDocsAccessClosed({ to, employeeName }) {
   });
 }
 
+// Email aux managers : nouvelle demande d'absence
+function sendAbsenceRequested({ to, employeeName, typeLabel, periodLabel, comment }) {
+  return send('demande absence', {
+    to,
+    subject: 'Demande d\'absence - ' + employeeName + ' (' + typeLabel + ')',
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour,</p>
+          <p><strong>${esc(employeeName)}</strong> a fait une demande d'absence :</p>
+          <div class="highlight">
+            <strong>${esc(typeLabel)}</strong><br>
+            ${esc(periodLabel)}
+            ${comment ? '<br><em>« ' + esc(comment) + ' »</em>' : ''}
+          </div>
+          <a href="${APP_URL}" class="btn">Traiter la demande</a>
+        </div>
+      `)
+  });
+}
+
+// Email au salarie : decision sur sa demande d'absence
+function sendAbsenceDecided({ to, employeeName, typeLabel, periodLabel, accepted, managerComment }) {
+  return send('decision absence', {
+    to,
+    subject: 'Votre demande d\'absence a ete ' + (accepted ? 'acceptee' : 'refusee'),
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>Votre demande d'absence a ete <strong>${accepted ? 'acceptee' : 'refusee'}</strong> :</p>
+          <div class="${accepted ? 'highlight' : 'danger'}">
+            <strong>${esc(typeLabel)}</strong><br>
+            ${esc(periodLabel)}
+            ${managerComment ? '<br>Commentaire : <em>' + esc(managerComment) + '</em>' : ''}
+          </div>
+          <a href="${APP_URL}" class="btn">Voir mes absences</a>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendAbsenceRequested,
+  sendAbsenceDecided,
   sendDocsAccessEnding,
   sendDocsAccessClosed,
   sendDocumentAvailable,
