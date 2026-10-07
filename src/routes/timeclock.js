@@ -6,7 +6,7 @@ const { managerOnly, isEmployeeScoped } = require('../auth');
 
 // POST /api/timeclock/scan
 router.post('/scan', async (req, res) => {
-  const { employee_id, action, latitude, longitude, geo_valid } = req.body;
+  const { employee_id, action, latitude, longitude, geo_valid, photo_path } = req.body;
   if (!employee_id || !action) return res.status(400).json({ error: 'employee_id et action sont requis' });
   if (!['in','out'].includes(action)) return res.status(400).json({ error: 'action doit etre in ou out' });
   // Un salarie ne peut pointer que pour lui-meme
@@ -18,6 +18,11 @@ router.post('/scan', async (req, res) => {
       [employee_id, action]
     );
     const data = result.rows[0].resultat;
+
+    // Photo de pointage : deposee par l'application dans le dossier du salarie (<id>/pointage/...), on enregistre son chemin
+    if (photo_path && typeof photo_path === 'string' && photo_path.startsWith(employee_id + '/pointage/') && !photo_path.includes('..')) {
+      await pool.query('UPDATE timeclock SET photo_path = $1 WHERE id = $2', [photo_path, data.scan_id]);
+    }
 
     // Sauvegarde geo si fournie
     if (latitude != null && longitude != null) {

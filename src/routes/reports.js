@@ -28,6 +28,11 @@ function compareDay(planned, actual) {
 
   out.planned = pl.length ? hhmm(pl[0].start) + '-' + hhmm(pl[pl.length - 1].end) : null;
   out.actual = actual.length ? actual.map(i => hhmm(i.in) + '-' + (i.out === null ? '?' : hhmm(i.out))).join(' / ') : null;
+  // Photos prises au pointage (chemins dans le stockage, affichees en miniature par l'application)
+  out.photos = actual.flatMap(i => [
+    i.photoIn ? { label: 'Arrivée ' + hhmm(i.in), path: i.photoIn } : null,
+    i.photoOut ? { label: 'Départ ' + hhmm(i.out), path: i.photoOut } : null,
+  ]).filter(Boolean);
   out.planned_min = plannedMin;
   out.worked_min = workedMin;
 
@@ -59,7 +64,7 @@ router.get('/realise', managerOnly, async (req, res) => {
       pool.query(`SELECT employee_id, action,
                     to_char(scanned_at AT TIME ZONE 'Europe/Paris', 'YYYY-MM-DD') AS day,
                     EXTRACT(HOUR FROM scanned_at AT TIME ZONE 'Europe/Paris') * 60 + EXTRACT(MINUTE FROM scanned_at AT TIME ZONE 'Europe/Paris') AS minute,
-                    scanned_at
+                    scanned_at, photo_path
                   FROM timeclock
                   WHERE scanned_at AT TIME ZONE 'Europe/Paris' >= $1::date - 1 AND scanned_at AT TIME ZONE 'Europe/Paris' < $1::date + 8
                   ORDER BY employee_id, scanned_at`, [week]),
@@ -77,9 +82,9 @@ router.get('/realise', managerOnly, async (req, res) => {
         if (s.action === 'in') {
           if (n && n.action === 'out' && new Date(n.scanned_at) - new Date(s.scanned_at) < 24 * 3600 * 1000) {
             const nm = parseInt(n.minute, 10) + (n.day !== s.day ? 1440 : 0);
-            push(emp, s.day, { in: m, out: nm }); k++;
-          } else push(emp, s.day, { in: m, out: null });
-        } else push(emp, s.day, { in: null, out: m });
+            push(emp, s.day, { in: m, out: nm, photoIn: s.photo_path, photoOut: n.photo_path }); k++;
+          } else push(emp, s.day, { in: m, out: null, photoIn: s.photo_path });
+        } else push(emp, s.day, { in: null, out: m, photoOut: s.photo_path });
       }
     }
 
