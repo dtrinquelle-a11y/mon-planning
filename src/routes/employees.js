@@ -1,14 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const { pool, TODAY_SQL } = require('../db');
+const { managerOnly, isEmployeeScoped } = require('../auth');
 // GET /api/employees
-router.get('/', async (req, res) => {
+router.get('/', managerOnly, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.role, e.email,
               e.contract_hours, e.contract_type, e.hire_date,
               e.is_active, e.service, e.services_secondaires,
               e.phone, e.address, e.birth_date, e.onboarding_completed,
+              e.sort_order, e.is_temp,
               COALESCE(m.worked_hours, 0) AS heures_travaillees,
               CASE
                 WHEN COALESCE(m.worked_hours, 0) > COALESCE(m.threshold_25, 1790) THEN 'majoration_50'
@@ -26,6 +28,7 @@ router.get('/', async (req, res) => {
 
 // GET /api/employees/:id
 router.get('/:id', async (req, res) => {
+  if (isEmployeeScoped(req) && req.params.id !== req.user.employeeId) return res.status(403).json({ error: 'Acces refuse' });
   try {
     const result = await pool.query(
       'SELECT * FROM employees WHERE id = $1',
@@ -37,7 +40,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/employees
-router.post('/', async (req, res) => {
+router.post('/', managerOnly, async (req, res) => {
   const { first_name, last_name, role, email, contract_hours, contract_type, service } = req.body;
   try {
     const result = await pool.query(
@@ -50,10 +53,10 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/employees/:id
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', managerOnly, async (req, res) => {
   const allowed = ['first_name', 'last_name', 'role', 'email', 'contract_hours',
                    'contract_type', 'service', 'services_secondaires', 'is_active',
-                   'phone', 'address', 'birth_date'];
+                   'phone', 'address', 'birth_date', 'sort_order'];
   const updates = Object.keys(req.body).filter(k => allowed.includes(k));
   if (!updates.length) return res.status(400).json({ error: 'Aucun champ valide' });
   const setClause = updates.map((k, i) => `${k} = $${i + 1}`).join(', ');

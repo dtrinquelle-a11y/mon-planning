@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { managerOnly } = require('../auth');
 
 // Reglages cle/valeur (table app_settings, colonne value en jsonb)
 async function upsertSetting(key, value) {
@@ -12,7 +13,7 @@ async function upsertSetting(key, value) {
 }
 
 // GET /api/settings -> { cle: valeur, ... }
-router.get('/', async (req, res) => {
+router.get('/', managerOnly, async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM app_settings');
     const map = {};
@@ -25,7 +26,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/settings/:key
-router.get('/:key', async (req, res) => {
+router.get('/:key', managerOnly, async (req, res) => {
   try {
     const result = await pool.query('SELECT value FROM app_settings WHERE key = $1', [req.params.key]);
     res.json({ key: req.params.key, value: result.rows[0] ? result.rows[0].value : null });
@@ -33,7 +34,7 @@ router.get('/:key', async (req, res) => {
 });
 
 // PATCH /api/settings/:key  body: la valeur complete (objet JSON)
-router.patch('/:key', async (req, res) => {
+router.patch('/:key', managerOnly, async (req, res) => {
   try {
     await upsertSetting(req.params.key, req.body);
     res.json({ success: true });
@@ -41,7 +42,7 @@ router.patch('/:key', async (req, res) => {
 });
 
 // PUT /api/settings/:key  body: { value: ... }
-router.put('/:key', async (req, res) => {
+router.put('/:key', managerOnly, async (req, res) => {
   try {
     await upsertSetting(req.params.key, req.body.value);
     res.json({ ok: true, key: req.params.key, value: req.body.value });

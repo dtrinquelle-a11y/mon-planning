@@ -2,12 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { pool, TZ, TODAY_SQL } = require('../db');
 const { sendGeoAlert } = require('../email');
+const { managerOnly, isEmployeeScoped } = require('../auth');
 
 // POST /api/timeclock/scan
 router.post('/scan', async (req, res) => {
   const { employee_id, action, latitude, longitude, geo_valid } = req.body;
   if (!employee_id || !action) return res.status(400).json({ error: 'employee_id et action sont requis' });
   if (!['in','out'].includes(action)) return res.status(400).json({ error: 'action doit etre in ou out' });
+  // Un salarie ne peut pointer que pour lui-meme
+  if (isEmployeeScoped(req) && employee_id !== req.user.employeeId) return res.status(403).json({ error: 'Vous ne pouvez pointer que pour vous-meme' });
 
   try {
     const result = await pool.query(
@@ -57,6 +60,7 @@ router.post('/scan', async (req, res) => {
 
 // GET /api/timeclock/today
 router.get('/today', async (req, res) => {
+  if (isEmployeeScoped(req) && !req.user.employeeId) return res.json([]);
   try {
     const result = await pool.query(`
       SELECT t.id, t.action, t.scanned_at, t.is_late, t.late_minutes,
@@ -65,14 +69,15 @@ router.get('/today', async (req, res) => {
       FROM timeclock t
       JOIN employees e ON t.employee_id = e.id
       WHERE (t.scanned_at AT TIME ZONE '${TZ}')::date = ${TODAY_SQL}
+        AND ($1::uuid IS NULL OR t.employee_id = $1::uuid)
       ORDER BY t.scanned_at DESC
-    `);
+    `, [isEmployeeScoped(req) ? req.user.employeeId : null]);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/timeclock/presence
-router.get('/presence', async (req, res) => {
+router.get('/presence', managerOnly, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT DISTINCT ON (t.employee_id)
@@ -90,6 +95,7 @@ router.get('/presence', async (req, res) => {
 
 // GET /api/timeclock/modulation/:employee_id
 router.get('/modulation/:employee_id', async (req, res) => {
+  if (isEmployeeScoped(req) && req.params.employee_id !== req.user.employeeId) return res.status(403).json({ error: 'Acces refuse' });
   try {
     const result = await pool.query(`
       SELECT e.first_name, e.last_name,
@@ -116,7 +122,7 @@ router.get('/modulation/:employee_id', async (req, res) => {
 });
 
 // GET /api/timeclock/modulation
-router.get('/modulation', async (req, res) => {
+router.get('/modulation', managerOnly, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT e.id, e.first_name, e.last_name, e.role,

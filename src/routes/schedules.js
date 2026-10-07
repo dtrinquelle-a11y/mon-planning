@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool, TZ } = require('../db');
 const { sendPlanningPublished, sendShiftModified } = require('../email');
+const { managerOnly, isEmployeeScoped } = require('../auth');
 
 // Erreur base de donnees -> message lisible (doublon : meme salarie, meme jour, meme heure de debut)
 function sendDbError(res, err) {
@@ -20,6 +21,7 @@ function formatDate(d) {
 router.get('/', async (req, res) => {
   const { week } = req.query;
   if (!week) return res.status(400).json({ error: 'Parametre week requis' });
+  if (isEmployeeScoped(req) && !req.user.employeeId) return res.json([]);
   try {
     const result = await pool.query(`
       SELECT s.*, e.id AS employee_id, e.first_name, e.last_name, e.role,
@@ -28,14 +30,15 @@ router.get('/', async (req, res) => {
       JOIN employees e ON s.employee_id = e.id
       WHERE s.work_date >= $1::date
         AND s.work_date < $1::date + INTERVAL '7 days'
+        AND ($2::uuid IS NULL OR s.employee_id = $2::uuid)
       ORDER BY s.work_date, s.start_time
-    `, [week]);
+    `, [week, isEmployeeScoped(req) ? req.user.employeeId : null]);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/schedules/monthly-summary?month=2026-06
-router.get('/monthly-summary', async (req, res) => {
+router.get('/monthly-summary', managerOnly, async (req, res) => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const monthStart = month + '-01';
   try {
@@ -92,7 +95,7 @@ router.get('/monthly-summary', async (req, res) => {
 });
 
 // POST /api/schedules
-router.post('/', async (req, res) => {
+router.post('/', managerOnly, async (req, res) => {
   const { employee_id, work_date, start_time, end_time, shift_type, break_minutes, note } = req.body;
   if (!employee_id || !work_date || !start_time || !end_time || !shift_type)
     return res.status(400).json({ error: 'Champs requis manquants' });
@@ -106,7 +109,7 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/schedules/:id
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', managerOnly, async (req, res) => {
   const allowed = ['start_time', 'end_time', 'shift_type', 'break_minutes', 'note', 'work_date', 'employee_id'];
   const updates = Object.keys(req.body).filter(k => allowed.includes(k));
   if (!updates.length) return res.status(400).json({ error: 'Aucun champ valide' });
@@ -141,7 +144,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 // POST /api/schedules/publish
-router.post('/publish', async (req, res) => {
+router.post('/publish', managerOnly, async (req, res) => {
   const { week } = req.body;
   if (!week) return res.status(400).json({ error: 'Parametre week requis' });
   try {
@@ -169,7 +172,7 @@ router.post('/publish', async (req, res) => {
 });
 
 // DELETE /api/schedules/:id
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', managerOnly, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM schedules WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Creneau introuvable' });
