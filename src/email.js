@@ -218,17 +218,19 @@ function sendAbsenceRequested({ to, employeeName, typeLabel, periodLabel, commen
 }
 
 // Email au salarie : decision sur sa demande d'absence
-function sendAbsenceDecided({ to, employeeName, typeLabel, periodLabel, accepted, managerComment }) {
+function sendAbsenceDecided({ to, employeeName, typeLabel, periodLabel, accepted, managerComment, requestedLabel }) {
+  const decision = accepted ? (requestedLabel ? 'acceptee avec modification des dates' : 'acceptee') : 'refusee';
   return send('decision absence', {
     to,
-    subject: 'Votre demande d\'absence a ete ' + (accepted ? 'acceptee' : 'refusee'),
+    subject: 'Votre demande d\'absence a ete ' + decision,
     html: baseTemplate(`
         <div class="content">
           <p>Bonjour ${esc(employeeName)},</p>
-          <p>Votre demande d'absence a ete <strong>${accepted ? 'acceptee' : 'refusee'}</strong> :</p>
-          <div class="${accepted ? 'highlight' : 'danger'}">
+          <p>Votre demande d'absence a ete <strong>${decision}</strong> :</p>
+          <div class="${accepted ? (requestedLabel ? 'warning' : 'highlight') : 'danger'}">
             <strong>${esc(typeLabel)}</strong><br>
-            ${esc(periodLabel)}
+            ${requestedLabel ? 'Dates retenues : ' : ''}${esc(periodLabel)}
+            ${requestedLabel ? '<br>Vous aviez demande : ' + esc(requestedLabel) : ''}
             ${managerComment ? '<br>Commentaire : <em>' + esc(managerComment) + '</em>' : ''}
           </div>
           <a href="${APP_URL}" class="btn">Voir mes absences</a>
@@ -238,7 +240,7 @@ function sendAbsenceDecided({ to, employeeName, typeLabel, periodLabel, accepted
 }
 
 // Email au salarie : absence deja acceptee, modifiee ou annulee par l'employeur
-function sendAbsenceChanged({ to, employeeName, typeLabel, periodLabel, cancelled, managerComment }) {
+function sendAbsenceChanged({ to, employeeName, typeLabel, periodLabel, cancelled, managerComment, requestedLabel }) {
   return send('absence ' + (cancelled ? 'annulee' : 'modifiee'), {
     to,
     subject: 'Votre absence a ete ' + (cancelled ? 'annulee' : 'modifiee'),
@@ -249,6 +251,7 @@ function sendAbsenceChanged({ to, employeeName, typeLabel, periodLabel, cancelle
           <div class="${cancelled ? 'danger' : 'warning'}">
             <strong>${esc(typeLabel)}</strong><br>
             ${cancelled ? '' : 'Nouvelles dates : '}${esc(periodLabel)}
+            ${!cancelled && requestedLabel ? '<br>Dates demandees initialement : ' + esc(requestedLabel) : ''}
             ${managerComment ? '<br>Motif : <em>' + esc(managerComment) + '</em>' : ''}
           </div>
           <p>Pour toute question, rapprochez-vous de votre responsable.</p>
