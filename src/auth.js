@@ -13,7 +13,10 @@ async function resolveUser(token) {
   if (hit && hit.expires > Date.now()) return hit.user;
   if (!supabase) throw new Error('Authentification non configuree (SUPABASE_URL / SUPABASE_ANON_KEY)');
   const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return null;
+  if (error || !data.user) {
+    console.warn('[Auth] Jeton refuse :', error ? error.message : 'utilisateur introuvable');
+    return null;
+  }
   const { rows } = await pool.query('SELECT role, employee_id FROM user_profiles WHERE id = $1', [data.user.id]);
   const profile = rows[0] || {};
   const user = {
