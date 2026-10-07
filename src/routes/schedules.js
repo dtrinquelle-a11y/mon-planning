@@ -3,6 +3,12 @@ const router = express.Router();
 const { pool, TZ } = require('../db');
 const { sendPlanningPublished, sendShiftModified } = require('../email');
 
+// Erreur base de donnees -> message lisible (doublon : meme salarie, meme jour, meme heure de debut)
+function sendDbError(res, err) {
+  if (err.code === '23505') return res.status(409).json({ error: 'Un creneau existe deja pour ce salarie ce jour-la a cette heure de debut.' });
+  res.status(500).json({ error: err.message });
+}
+
 // pg renvoie les colonnes DATE en Date a minuit heure locale : on relit les composantes locales
 function formatDate(d) {
   if (!(d instanceof Date)) return String(d);
@@ -96,7 +102,7 @@ router.post('/', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
     `, [employee_id, work_date, start_time, end_time, shift_type, break_minutes || 0, note || null]);
     res.status(201).json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { sendDbError(res, err); }
 });
 
 // PATCH /api/schedules/:id
@@ -131,7 +137,7 @@ router.patch('/:id', async (req, res) => {
       });
     }
     res.json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { sendDbError(res, err); }
 });
 
 // POST /api/schedules/publish
