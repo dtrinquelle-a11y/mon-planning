@@ -108,6 +108,40 @@ router.post('/', managerOnly, async (req, res) => {
   } catch (err) { sendDbError(res, err); }
 });
 
+// POST /api/schedules/bulk  body: { shifts: [{ employee_id, work_date, start_time, end_time, shift_type, break_minutes, note }] }
+// Creation en lot (application d'un modele de semaine) ; un creneau deja existant (meme salarie, jour, heure) est ignore
+router.post('/bulk', managerOnly, async (req, res) => {
+  const shifts = Array.isArray(req.body.shifts) ? req.body.shifts : [];
+  if (!shifts.length) return res.json({ created: 0, skipped: 0 });
+  if (shifts.length > 500) return res.status(400).json({ error: 'Trop de creneaux en une fois (max 500)' });
+  try {
+    const result = await pool.query(`
+      INSERT INTO schedules (employee_id, work_date, start_time, end_time, shift_type, break_minutes, note)
+      SELECT employee_id, work_date, start_time, end_time, shift_type, COALESCE(break_minutes, 0), note
+      FROM json_to_recordset($1::json) AS x(employee_id uuid, work_date date, start_time time, end_time time,
+                                             shift_type text, break_minutes int, note text)
+      ON CONFLICT (employee_id, work_date, start_time) DO NOTHING
+      RETURNING id
+    `, [JSON.stringify(shifts)]);
+    res.status(201).json({ created: result.rowCount, skipped: shifts.length - result.rowCount });
+  } catch (err) { sendDbError(res, err); }
+});
+
+// POST /api/schedules/clear  body: { week: 'AAAA-MM-JJ' (lundi), employee_ids: [...] }
+// Vide la semaine pour ces salaries (option "remplacer" lors de l'application d'un modele)
+router.post('/clear', managerOnly, async (req, res) => {
+  const { week, employee_ids } = req.body;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(week || '') || !Array.isArray(employee_ids) || !employee_ids.length)
+    return res.status(400).json({ error: 'Parametres week et employee_ids requis' });
+  try {
+    const result = await pool.query(
+      `DELETE FROM schedules WHERE work_date >= $1::date AND work_date < $1::date + 7 AND employee_id = ANY($2::uuid[]) RETURNING id`,
+      [week, employee_ids]
+    );
+    res.json({ deleted: result.rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // PATCH /api/schedules/:id
 router.patch('/:id', managerOnly, async (req, res) => {
   const allowed = ['start_time', 'end_time', 'shift_type', 'break_minutes', 'note', 'work_date', 'employee_id'];
