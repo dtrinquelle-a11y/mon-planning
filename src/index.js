@@ -19,6 +19,7 @@ const settingsRouter = require('./routes/settings');
 const documentsRouter = require('./routes/documents');
 const absencesRouter = require('./routes/absences');
 const exportsRouter = require('./routes/exports');
+const reportsRouter = require('./routes/reports');
 
 // Health check (public)
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -31,6 +32,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/absences', absencesRouter);
 app.use('/api/exports', exportsRouter);
+app.use('/api/reports', reportsRouter);
 
 // Ping DB toutes les 9 minutes pour éviter mise en pause Supabase
 setInterval(async () => {
