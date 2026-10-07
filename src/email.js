@@ -161,7 +161,45 @@ function sendDocumentAvailable({ to, employeeName, docLabel }) {
   });
 }
 
+// Contact RH indique dans les emails (meme adresse que la politique de confidentialite)
+const CONTACT_RH = process.env.CONTACT_RH || 'dominique@campingleboutdumonde.fr';
+
+// Email J-7 : l'acces aux documents va se fermer (3 mois apres la fin du contrat)
+function sendDocsAccessEnding({ to, employeeName, accessEndLabel }) {
+  return send('fin acces documents J-7', {
+    to,
+    subject: 'Vos documents restent consultables jusqu\'au ' + accessEndLabel,
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>Votre contrat etant termine, l'acces a vos documents dans l'application (bulletins de paie, contrat, attestations) se fermera le :</p>
+          <div class="warning"><strong>${esc(accessEndLabel)}</strong></div>
+          <p>Pensez a les telecharger d'ici la, depuis l'onglet <strong>Mes documents</strong>.</p>
+          <a href="${APP_URL}" class="btn">Telecharger mes documents</a>
+        </div>
+      `)
+  });
+}
+
+// Email : l'acces aux documents est ferme
+function sendDocsAccessClosed({ to, employeeName }) {
+  return send('acces documents ferme', {
+    to,
+    subject: 'Acces a vos documents ferme',
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>L'acces a vos documents dans l'application Planning HPA est desormais ferme, 3 mois apres la fin de votre contrat.</p>
+          <div class="highlight">Vos documents restent conserves par votre employeur. Pour obtenir une copie (par exemple un bulletin de paie), ecrivez a <strong>${esc(CONTACT_RH)}</strong>.</div>
+          <p>Merci pour votre saison parmi nous !</p>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendDocsAccessEnding,
+  sendDocsAccessClosed,
   sendDocumentAvailable,
   sendPlanningPublished,
   sendShiftModified,

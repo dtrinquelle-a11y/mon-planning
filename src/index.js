@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { pool, TZ } = require('./db');
 const { requireAuth } = require('./auth');
+const { startDocsAccessJob } = require('./jobs/docsAccess');
 
 const app = express();
 // CORS_ORIGIN : liste d'origines autorisees separees par des virgules (toutes si absent)
@@ -36,6 +37,9 @@ setInterval(async () => {
     console.error('[Ping] DB error:', e.message);
   }
 }, 9 * 60 * 1000);
+
+// Emails de fin d'acces aux documents (J-7 et fermeture)
+startDocsAccessJob();
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
