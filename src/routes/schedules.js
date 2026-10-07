@@ -127,7 +127,7 @@ router.patch('/:id', managerOnly, async (req, res) => {
     const before = old.rows[0];
     const after = result.rows[0];
     const timeChanged = before && (before.start_time !== after.start_time || before.end_time !== after.end_time);
-    if (timeChanged && before.is_published && before.email) {
+    if (timeChanged && before.is_published && before.email && !before.email.endsWith('@temp.fr')) {
       sendShiftModified({
         to: before.email,
         employeeName: before.first_name + ' ' + before.last_name,
@@ -153,6 +153,7 @@ router.post('/publish', managerOnly, async (req, res) => {
       FROM schedules s JOIN employees e ON s.employee_id = e.id
       WHERE s.work_date >= $1::date AND s.work_date < $1::date + INTERVAL '7 days'
         AND s.is_published = false AND e.email IS NOT NULL
+        AND e.email NOT LIKE '%@temp.fr' -- equipiers temporaires : adresse fictive
     `, [week]);
     const result = await pool.query(`
       UPDATE schedules SET is_published = true
