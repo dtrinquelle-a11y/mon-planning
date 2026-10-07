@@ -237,7 +237,29 @@ function sendAbsenceDecided({ to, employeeName, typeLabel, periodLabel, accepted
   });
 }
 
+// Email au salarie : absence deja acceptee, modifiee ou annulee par l'employeur
+function sendAbsenceChanged({ to, employeeName, typeLabel, periodLabel, cancelled, managerComment }) {
+  return send('absence ' + (cancelled ? 'annulee' : 'modifiee'), {
+    to,
+    subject: 'Votre absence a ete ' + (cancelled ? 'annulee' : 'modifiee'),
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>${cancelled ? 'Votre absence suivante a ete <strong>annulee</strong> par votre responsable :' : 'Les dates de votre absence ont ete <strong>modifiees</strong> par votre responsable :'}</p>
+          <div class="${cancelled ? 'danger' : 'warning'}">
+            <strong>${esc(typeLabel)}</strong><br>
+            ${cancelled ? '' : 'Nouvelles dates : '}${esc(periodLabel)}
+            ${managerComment ? '<br>Motif : <em>' + esc(managerComment) + '</em>' : ''}
+          </div>
+          <p>Pour toute question, rapprochez-vous de votre responsable.</p>
+          <a href="${APP_URL}" class="btn">Voir mes absences</a>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendAbsenceChanged,
   sendAbsenceRequested,
   sendAbsenceDecided,
   sendDocsAccessEnding,
