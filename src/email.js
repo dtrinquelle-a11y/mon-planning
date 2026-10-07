@@ -261,7 +261,28 @@ function sendAbsenceChanged({ to, employeeName, typeLabel, periodLabel, cancelle
   });
 }
 
+// Email aux managers : oubli de pointage (arrivee ou depart)
+function sendTimeclockMissing({ to, employeeName, kind, dateLabel, shiftLabel }) {
+  const what = kind === 'arrivee' ? 'son arrivee' : 'son depart';
+  return send('oubli pointage ' + kind, {
+    to,
+    subject: 'Pointage manquant - ' + employeeName + ' (' + (kind === 'arrivee' ? 'arrivee' : 'depart') + ')',
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour,</p>
+          <p><strong>${esc(employeeName)}</strong> n'a pas pointe ${what} :</p>
+          <div class="warning">
+            Creneau du <strong>${esc(dateLabel)}</strong> · ${esc(shiftLabel)}
+          </div>
+          <p>Verifiez sa presence ou un eventuel oubli de pointage.</p>
+          <a href="${APP_URL}" class="btn">Voir le realise</a>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendTimeclockMissing,
   sendAbsenceChanged,
   sendAbsenceRequested,
   sendAbsenceDecided,

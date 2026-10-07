@@ -4,6 +4,7 @@ const cors = require('cors');
 const { pool, TZ } = require('./db');
 const { requireAuth } = require('./auth');
 const { startDocsAccessJob } = require('./jobs/docsAccess');
+const { startTimeclockAlertsJob } = require('./jobs/timeclockAlerts');
 
 const app = express();
 // CORS_ORIGIN : liste d'origines autorisees separees par des virgules (toutes si absent)
@@ -46,6 +47,8 @@ setInterval(async () => {
 
 // Emails de fin d'acces aux documents (J-7 et fermeture)
 startDocsAccessJob();
+// Alertes d'oubli de pointage (si activees dans la page Realise)
+startTimeclockAlertsJob();
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
