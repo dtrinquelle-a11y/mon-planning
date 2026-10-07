@@ -54,7 +54,7 @@ router.get('/paie', managerOnly, async (req, res) => {
 
   try {
     const [emps, shifts, worked, lates, modul] = await Promise.all([
-      pool.query(`SELECT id, first_name, last_name, service, contract_type, contract_hours, is_active, is_temp
+      pool.query(`SELECT id, first_name, last_name, service, contract_type, contract_hours, hire_date, contract_end_date, is_active, is_temp
                   FROM employees ORDER BY service, last_name, first_name`),
       pool.query(`SELECT employee_id, work_date, start_time, end_time, break_minutes, shift_type FROM schedules
                   WHERE work_date >= $1 AND work_date <= $2 AND shift_type <> 'repos'`, [iso(firstMonday), iso(lastSunday)]),
@@ -111,6 +111,7 @@ router.get('/paie', managerOnly, async (req, res) => {
       rows.push({
         employee_id: e.id, nom: e.last_name || '', prenom: e.first_name || '', service: e.service,
         contrat: e.contract_type, heures_contrat: contract, temporaire: !!e.is_temp,
+        debut_contrat: e.hire_date ? dateStr(e.hire_date) : null, fin_contrat: e.contract_end_date ? dateStr(e.contract_end_date) : null,
         heures_planifiees: h2(planned),
         heures_realisees: workedBy[e.id] !== undefined ? h2(workedBy[e.id]) : null,
         heures_au_dela_contrat: Math.round(weeks.reduce((n, w) => n + w.au_dela, 0) * 100) / 100,
