@@ -50,6 +50,7 @@ router.get('/monthly-summary', managerOnly, async (req, res) => {
       FROM schedules s
       WHERE s.work_date >= $1::date
         AND s.work_date < $1::date + INTERVAL '1 month'
+        AND s.shift_type NOT IN ('repos', 'recup')
       GROUP BY s.employee_id
     `, [monthStart]);
 

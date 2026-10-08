@@ -43,20 +43,21 @@ function baseTemplate(content) {
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: 'Courier New', monospace; background: #0F1117; color: #E8E6DC; margin: 0; padding: 20px; }
-    .container { max-width: 500px; margin: 0 auto; background: #1A1D27; border: 1px solid #2A2D3A; border-radius: 12px; padding: 28px; }
-    .logo { color: #7C6FCD; font-size: 16px; font-weight: bold; margin-bottom: 20px; }
-    .content { font-size: 14px; line-height: 1.6; color: #E8E6DC; }
-    .highlight { background: #2A1F4A; border: 1px solid #7C6FCD; border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
-    .warning { background: #3A2A10; border: 1px solid #F5A623; border-radius: 8px; padding: 12px 16px; margin: 16px 0; color: #F5C870; }
-    .danger { background: #3A1A1A; border: 1px solid #E85D5D; border-radius: 8px; padding: 12px 16px; margin: 16px 0; color: #F0A0A0; }
-    .footer { margin-top: 24px; font-size: 11px; color: #6B6E82; border-top: 1px solid #2A2D3A; padding-top: 14px; }
-    .btn { display: inline-block; background: #7C6FCD; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; margin-top: 14px; }
+    body { font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #F5F6FA; color: #111827; margin: 0; padding: 24px 12px; }
+    .container { max-width: 520px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E5E7EF; border-radius: 16px; padding: 32px; box-shadow: 0 4px 16px rgba(17,24,39,0.06); }
+    .logo { margin-bottom: 24px; font-size: 16px; font-weight: 700; color: #111827; }
+    .logo-badge { display: inline-block; background: #5B4FD6; color: #fff; font-size: 11px; font-weight: 700; padding: 6px 8px; border-radius: 8px; margin-right: 8px; vertical-align: middle; }
+    .content { font-size: 15px; line-height: 1.6; color: #111827; }
+    .highlight { background: #EEF0FF; border-left: 4px solid #5B4FD6; border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+    .warning { background: #FFF8EB; border-left: 4px solid #D97706; border-radius: 8px; padding: 12px 16px; margin: 16px 0; color: #78350F; }
+    .danger { background: #FEF2F2; border-left: 4px solid #DC2626; border-radius: 8px; padding: 12px 16px; margin: 16px 0; color: #7F1D1D; }
+    .footer { margin-top: 28px; font-size: 12px; color: #6B7280; border-top: 1px solid #EEF0F5; padding-top: 16px; }
+    .btn { display: inline-block; background: #5B4FD6; color: #ffffff !important; padding: 12px 22px; border-radius: 10px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 14px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">▸ PLANNING HPA</div>
+    <div class="logo"><span class="logo-badge">HPA</span>Planning · Le Bout du Monde</div>
     ${content}
     <div class="footer">Le Bout du Monde · 2 chemin de Rhodes, 11400 Verdun-en-Lauragais<br>Ce message est automatique, merci de ne pas y repondre.</div>
   </div>

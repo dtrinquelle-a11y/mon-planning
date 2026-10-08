@@ -59,7 +59,7 @@ router.get('/realise', managerOnly, async (req, res) => {
     const [emps, shifts, scans] = await Promise.all([
       pool.query('SELECT id, first_name, last_name, service, is_active, is_temp FROM employees'),
       pool.query(`SELECT employee_id, work_date, start_time, end_time, break_minutes FROM schedules
-                  WHERE work_date >= $1::date AND work_date < $1::date + 7 AND shift_type <> 'repos'`, [week]),
+                  WHERE work_date >= $1::date AND work_date < $1::date + 7 AND shift_type NOT IN ('repos', 'recup')`, [week]),
       // Pointages de la semaine (heure de Paris), avec la journee precedente pour un depart apres minuit
       pool.query(`SELECT employee_id, action,
                     to_char(scanned_at AT TIME ZONE 'Europe/Paris', 'YYYY-MM-DD') AS day,

@@ -51,9 +51,11 @@ router.get('/paie', managerOnly, async (req, res) => {
   const firstMonday = addDays(first, -((first.getUTCDay() + 6) % 7));
   const lastSunday = addDays(last, (7 - last.getUTCDay()) % 7);
   const ferie = new Set([...holidays(first.getUTCFullYear()), ...holidays(last.getUTCFullYear())]);
+  // Debut de la periode de modulation (1er novembre) contenant le mois
+  const periodStart = (first.getUTCMonth() >= 10 ? first.getUTCFullYear() : first.getUTCFullYear() - 1) + '-11-01';
 
   try {
-    const [emps, shifts, worked, lates, modul] = await Promise.all([
+    const [emps, shifts, worked, lates, modul, recupPeriod] = await Promise.all([
       pool.query(`SELECT id, first_name, last_name, service, contract_type, contract_hours, hire_date, contract_end_date, is_active, is_temp
                   FROM employees ORDER BY service, last_name, first_name`),
       pool.query(`SELECT employee_id, work_date, start_time, end_time, break_minutes, shift_type FROM schedules
@@ -74,7 +76,12 @@ router.get('/paie', managerOnly, async (req, res) => {
                   WHERE is_late AND scanned_at AT TIME ZONE 'Europe/Paris' >= $1::date AND scanned_at AT TIME ZONE 'Europe/Paris' < $2::date
                   GROUP BY employee_id`, [iso(first), iso(next)]),
       pool.query(`SELECT employee_id, worked_hours FROM modulation_counter WHERE period_start <= $1 AND period_end >= $1`, [iso(last)]),
+      // Creneaux de recuperation depuis le debut de la periode de modulation jusqu'a la fin du mois
+      pool.query(`SELECT employee_id, start_time, end_time, break_minutes FROM schedules
+                  WHERE shift_type = 'recup' AND work_date >= $1 AND work_date <= $2`, [periodStart, iso(last)]),
     ]);
+    const recupCumulBy = {};
+    recupPeriod.rows.forEach(s => { recupCumulBy[s.employee_id] = (recupCumulBy[s.employee_id] || 0) + shiftMinutes(s).net; });
 
     const workedBy = Object.fromEntries(worked.rows.map(r => [r.employee_id, parseFloat(r.minutes)]));
     const latesBy = Object.fromEntries(lates.rows.map(r => [r.employee_id, parseInt(r.n, 10)]));
@@ -90,11 +97,12 @@ router.get('/paie', managerOnly, async (req, res) => {
       if (!hasMonthShift && (!e.is_active || e.is_temp)) continue;
 
       const contract = parseFloat(e.contract_hours) || 35;
-      let planned = 0, night = 0, sunMin = 0, ferMin = 0;
+      let planned = 0, night = 0, sunMin = 0, ferMin = 0, recupMin = 0;
       const sunDays = new Set(), ferDays = new Set(), weekMin = {};
       for (const s of list) {
         const d = dateStr(s.work_date);
         const { net, night: nm } = shiftMinutes(s);
+        if (s.shift_type === 'recup') { if (d >= iso(first) && d <= iso(last)) recupMin += net; continue; }
         // Semaine du creneau (lundi) : pour les heures au-dela du contrat
         const dd = D(d), monday = iso(addDays(dd, -((dd.getUTCDay() + 6) % 7)));
         weekMin[monday] = (weekMin[monday] || 0) + net;
@@ -119,6 +127,8 @@ router.get('/paie', managerOnly, async (req, res) => {
         dimanches_jours: sunDays.size, dimanches_heures: h2(sunMin),
         feries_jours: ferDays.size, feries_heures: h2(ferMin),
         nuit_heures: h2(night),
+        recup_heures: h2(recupMin),
+        recup_cumul_periode: h2(recupCumulBy[e.id] || 0),
         retards: latesBy[e.id] || 0,
         modulation_cumul: modBy[e.id] !== undefined ? Math.round(modBy[e.id] * 100) / 100 : null,
       });
