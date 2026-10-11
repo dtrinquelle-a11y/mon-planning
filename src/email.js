@@ -7,6 +7,10 @@ if (!resend) console.warn('RESEND_API_KEY manquante : les emails ne seront pas e
 // definir EMAIL_FROM avec une adresse d'un domaine verifie dans Resend.
 const FROM = process.env.EMAIL_FROM || 'Planning HPA <onboarding@resend.dev>';
 const APP_URL = process.env.FRONTEND_URL || 'https://planning-frontend-production.up.railway.app';
+// Contact RH indique dans les emails (meme adresse que la politique de confidentialite)
+const CONTACT_RH = process.env.CONTACT_RH || 'dominique@campingleboutdumonde.fr';
+// Adresse qui recoit les reponses aux emails (sinon elles partiraient vers planning@, qui n'est pas une boite lue)
+const REPLY_TO = process.env.REPLY_TO || CONTACT_RH;
 
 // Echappe les valeurs inserees dans le HTML
 function esc(value) {
@@ -22,7 +26,7 @@ function esc(value) {
 async function send(label, message) {
   if (!resend) return false;
   try {
-    const { error } = await resend.emails.send({ from: FROM, ...message });
+    const { error } = await resend.emails.send({ from: FROM, replyTo: REPLY_TO, ...message });
     if (error) {
       console.error('Erreur email ' + label + ':', error.message || error);
       return false;
@@ -59,7 +63,7 @@ function baseTemplate(content) {
   <div class="container">
     <div class="logo"><span class="logo-badge">HPA</span>Planning · Le Bout du Monde</div>
     ${content}
-    <div class="footer">Le Bout du Monde · 2 chemin de Rhodes, 11400 Verdun-en-Lauragais<br>Ce message est automatique, merci de ne pas y repondre.</div>
+    <div class="footer">Le Bout du Monde · 2 chemin de Rhodes, 11400 Verdun-en-Lauragais<br>Une question ? Repondez simplement a cet email.</div>
   </div>
 </body>
 </html>`;
@@ -162,9 +166,6 @@ function sendDocumentAvailable({ to, employeeName, docLabel }) {
   });
 }
 
-// Contact RH indique dans les emails (meme adresse que la politique de confidentialite)
-const CONTACT_RH = process.env.CONTACT_RH || 'dominique@campingleboutdumonde.fr';
-
 // Email J-7 : l'acces aux documents va se fermer (3 mois apres la fin du contrat)
 function sendDocsAccessEnding({ to, employeeName, accessEndLabel }) {
   return send('fin acces documents J-7', {
@@ -199,9 +200,10 @@ function sendDocsAccessClosed({ to, employeeName }) {
 }
 
 // Email aux managers : nouvelle demande d'absence
-function sendAbsenceRequested({ to, employeeName, typeLabel, periodLabel, comment }) {
+function sendAbsenceRequested({ to, employeeName, employeeEmail, typeLabel, periodLabel, comment }) {
   return send('demande absence', {
     to,
+    ...(employeeEmail ? { replyTo: employeeEmail } : {}), // "Repondre" ecrit directement au salarie
     subject: 'Demande d\'absence - ' + employeeName + ' (' + typeLabel + ')',
     html: baseTemplate(`
         <div class="content">
@@ -282,7 +284,48 @@ function sendTimeclockMissing({ to, employeeName, kind, dateLabel, shiftLabel })
   });
 }
 
+// Email : documents obligatoires a lire et signer (nouveau document ou relance)
+function sendDocsToSign({ to, employeeName, titles }) {
+  const n = titles.length;
+  return send('documents a signer', {
+    to,
+    subject: n > 1 ? n + ' documents a lire et signer' : 'Document a lire et signer : ' + titles[0],
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>${n > 1 ? 'Ces documents obligatoires attendent' : 'Ce document obligatoire attend'} votre signature :</p>
+          <div class="warning">${titles.map(t => '<strong>' + esc(t) + '</strong>').join('<br>')}</div>
+          <p>Connectez-vous, onglet <strong>A signer</strong> : ouvrez chaque document (ou regardez la video), puis signez.</p>
+          <a href="${APP_URL}" class="btn">Lire et signer</a>
+        </div>
+      `)
+  });
+}
+
+// Email du dimanche 18 h (pointeuse desactivee) : recapitulatif de la semaine et journees restant a valider
+function sendWeekToConfirm({ to, employeeName, weekLabel, days, pending, lockLabel }) {
+  const rows = days.map(d => '<tr><td style="padding:4px 10px 4px 0">' + esc(d.day) + '</td><td style="padding:4px 10px 4px 0">' + esc(d.hours) + '</td>'
+    + '<td style="padding:4px 0;color:' + (d.ok ? '#16A34A' : '#D97706') + ';font-weight:600">' + esc(d.status) + '</td></tr>').join('');
+  return send('validation semaine', {
+    to,
+    subject: pending ? 'Validez vos horaires de la semaine (' + pending + ' journee' + (pending > 1 ? 's' : '') + ')' : 'Recapitulatif de vos horaires de la semaine',
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>Voici vos horaires de la semaine du <strong>${esc(weekLabel)}</strong> :</p>
+          <table style="font-size:14px;border-collapse:collapse;margin:8px 0 16px">${rows}</table>
+          ${pending
+            ? `<div class="warning"><strong>${pending} journee${pending > 1 ? 's' : ''} a valider.</strong><br>La semaine sera cloturee <strong>${esc(lockLabel)}</strong> : les journees non validees seront retenues telles que prevues au planning.</div>`
+            : `<div class="highlight">Toutes vos journees sont validees. La semaine sera cloturee ${esc(lockLabel)}.</div>`}
+          <a href="${APP_URL}" class="btn">${pending ? 'Valider mes horaires' : 'Voir mes horaires'}</a>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendWeekToConfirm,
+  sendDocsToSign,
   sendTimeclockMissing,
   sendAbsenceChanged,
   sendAbsenceRequested,

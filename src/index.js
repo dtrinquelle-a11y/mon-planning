@@ -5,6 +5,8 @@ const { pool, TZ } = require('./db');
 const { requireAuth } = require('./auth');
 const { startDocsAccessJob } = require('./jobs/docsAccess');
 const { startTimeclockAlertsJob } = require('./jobs/timeclockAlerts');
+const { startBackupJob } = require('./jobs/backups');
+const { startDeclarationsJob } = require('./jobs/declarations');
 
 const app = express();
 // CORS_ORIGIN : liste d'origines autorisees separees par des virgules (toutes si absent)
@@ -21,6 +23,7 @@ const documentsRouter = require('./routes/documents');
 const absencesRouter = require('./routes/absences');
 const exportsRouter = require('./routes/exports');
 const reportsRouter = require('./routes/reports');
+const mandatoryDocsRouter = require('./routes/mandatoryDocs');
 
 // Health check (public)
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -34,6 +37,7 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/absences', absencesRouter);
 app.use('/api/exports', exportsRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/mandatory-docs', mandatoryDocsRouter);
 
 // Ping DB toutes les 9 minutes pour éviter mise en pause Supabase
 setInterval(async () => {
@@ -49,6 +53,10 @@ setInterval(async () => {
 startDocsAccessJob();
 // Alertes d'oubli de pointage (si activees dans la page Realise)
 startTimeclockAlertsJob();
+// Sauvegarde automatique de toutes les donnees chaque nuit (vers 3 h)
+startBackupJob();
+// Pointeuse desactivee : recapitulatif du dimanche 18 h et cloture du lundi
+startDeclarationsJob();
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {

@@ -8,6 +8,9 @@ async function checkTimeclockAlerts() {
   const { rows: cfg } = await pool.query("SELECT value FROM app_settings WHERE key = 'alertes_pointage'");
   const conf = cfg[0] && cfg[0].value;
   if (!conf || !conf.enabled) return;
+  // Pointeuse desactivee : pas de pointage, donc pas d'alerte d'oubli
+  const { rows: on } = await pool.query('SELECT public.timeclock_enabled() AS enabled');
+  if (!on[0].enabled) return;
   const delay = [15, 30, 60].includes(Number(conf.delay_min)) ? Number(conf.delay_min) : 30;
 
   const { rows } = await pool.query('SELECT * FROM public.pending_timeclock_alerts($1)', [delay]);

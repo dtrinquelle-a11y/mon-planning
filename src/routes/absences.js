@@ -31,7 +31,7 @@ router.post('/notify', async (req, res) => {
       if (req.user && !req.user.isManager && req.user.employeeId !== a.employee_id) return res.status(403).json({ error: 'Acces refuse' });
       if (a.status !== 'en_attente') return res.json({ sent: 0 });
       const results = await Promise.all((a.manager_emails || []).map(to =>
-        sendAbsenceRequested({ to, employeeName, typeLabel, periodLabel: periodLabel(a), comment: a.comment })));
+        sendAbsenceRequested({ to, employeeName, employeeEmail: a.email && !a.email.endsWith('@temp.fr') ? a.email : null, typeLabel, periodLabel: periodLabel(a), comment: a.comment })));
       return res.json({ sent: results.filter(Boolean).length });
     }
 

@@ -13,6 +13,10 @@ router.post('/scan', async (req, res) => {
   if (isEmployeeScoped(req) && employee_id !== req.user.employeeId) return res.status(403).json({ error: 'Vous ne pouvez pointer que pour vous-meme' });
 
   try {
+    // Pointeuse desactivee (Parametrage > Pointeuse) : les salaries valident leurs horaires dans leur espace
+    const { rows: on } = await pool.query('SELECT public.timeclock_enabled() AS enabled');
+    if (!on[0].enabled) return res.status(409).json({ error: 'La pointeuse est desactivee : validez vos horaires dans Mon planning > Mes horaires' });
+
     const result = await pool.query(
       'SELECT process_timeclock_scan($1, $2) AS resultat',
       [employee_id, action]
