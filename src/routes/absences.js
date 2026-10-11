@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { sendAbsenceRequested, sendAbsenceDecided, sendAbsenceChanged } = require('../email');
+const { sendAbsenceRequested, sendAbsenceDecided, sendAbsenceChanged, sendClosureLeave } = require('../email');
+const { managerOnly } = require('../auth');
 
 const TYPE_LABELS = {
   conge_paye: 'Conges payes', repos: 'Repos / recuperation', indisponibilite: 'Indisponibilite',
@@ -50,6 +51,25 @@ router.post('/notify', async (req, res) => {
     if (!['acceptee', 'refusee'].includes(a.status) || !a.email || a.email.endsWith('@temp.fr')) return res.json({ sent: 0 });
     const ok = await sendAbsenceDecided({ to: a.email, employeeName, typeLabel, periodLabel: periodLabel(a), accepted: a.status === 'acceptee', managerComment: a.manager_comment, requestedLabel: requestedLabel(a) });
     res.json({ sent: ok ? 1 : 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/absences/closure-notify  body: { closure_id }
+// Previent chaque salarie des conges poses pour une fermeture de l'entreprise (Parametrage > Conges payes)
+router.post('/closure-notify', managerOnly, async (req, res) => {
+  const id = req.body.closure_id;
+  if (!/^[0-9a-f-]{36}$/i.test(id || '')) return res.status(400).json({ error: 'closure_id requis' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT a.start_date, a.end_date, a.comment, e.first_name, e.last_name, e.email
+         FROM absence_requests a JOIN employees e ON e.id = a.employee_id
+        WHERE a.closure_id = $1 AND a.status = 'acceptee'`, [id]);
+    let sent = 0;
+    for (const a of rows) {
+      if (!a.email || a.email.endsWith('@temp.fr')) continue;
+      if (await sendClosureLeave({ to: a.email, employeeName: a.first_name + ' ' + a.last_name, label: a.comment || "Fermeture de l'entreprise", periodLabel: periodLabel(a) })) sent++;
+    }
+    res.json({ sent, total: rows.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

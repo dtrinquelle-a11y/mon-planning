@@ -1,4 +1,4 @@
--- Structure Planning HPA, generee le 11/10/2026 12:04
+-- Structure Planning HPA, generee le 11/10/2026 16:29
 -- A executer sur un projet Supabase NEUF (SQL Editor), avant la restauration des donnees.
 -- Apres execution : definir le mot de passe du role planning_app (ALTER ROLE planning_app PASSWORD ...)
 -- et mettre a jour DATABASE_URL du backend.
@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS public.absence_requests (
   decided_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   original_start_date date,
-  original_end_date date
+  original_end_date date,
+  closure_id uuid
 );
 
 CREATE TABLE IF NOT EXISTS public.access_links (
@@ -410,6 +411,7 @@ ALTER TABLE public.work_declarations ADD CONSTRAINT work_declarations_employee_i
 ALTER TABLE public.work_declarations ADD CONSTRAINT work_declarations_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE;
 
 -- ===== Index =====
+CREATE INDEX absence_requests_closure ON public.absence_requests USING btree (closure_id) WHERE (closure_id IS NOT NULL);
 CREATE INDEX absence_requests_dates_idx ON public.absence_requests USING btree (start_date, end_date);
 CREATE INDEX mandatory_doc_signatures_doc_emp ON public.mandatory_doc_signatures USING btree (doc_id, employee_id, signed_at DESC);
 CREATE INDEX work_declaration_history_decl ON public.work_declaration_history USING btree (declaration_id, declared_at);
@@ -1138,9 +1140,10 @@ INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('documen
 INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('documents-rh', 'documents-rh', 'f', NULL) ON CONFLICT (id) DO NOTHING;
 
 -- ===== Regles d'acces =====
+CREATE POLICY "Acces lecture absences" ON public.absence_requests AS PERMISSIVE FOR SELECT TO planning_app USING (true);
 CREATE POLICY "Manager" ON public.absence_requests AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Salarie annule sa demande" ON public.absence_requests AS PERMISSIVE FOR UPDATE TO authenticated USING (((employee_id = my_employee_id()) AND (status = 'en_attente'::text))) WITH CHECK (((employee_id = my_employee_id()) AND (status = 'annulee'::text)));
-CREATE POLICY "Salarie demande une absence" ON public.absence_requests AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((employee_id = my_employee_id()) AND (status = 'en_attente'::text) AND (decided_by IS NULL) AND (manager_comment IS NULL) AND (original_start_date IS NULL) AND (original_end_date IS NULL)));
+CREATE POLICY "Salarie demande une absence" ON public.absence_requests AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((employee_id = my_employee_id()) AND (status = 'en_attente'::text) AND (decided_by IS NULL) AND (manager_comment IS NULL) AND (original_start_date IS NULL) AND (original_end_date IS NULL) AND (closure_id IS NULL)));
 CREATE POLICY "Salarie voit ses absences" ON public.absence_requests AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
 CREATE POLICY "Manager" ON public.access_links AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Acces settings" ON public.app_settings AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
@@ -1250,6 +1253,7 @@ CREATE POLICY "Salarie peut remplacer ses fichiers" ON storage.objects AS PERMIS
   WHERE (user_profiles.id = auth.uid())))));
 
 -- ===== Droits =====
+GRANT SELECT ON public.absence_requests TO planning_app;
 GRANT INSERT, SELECT, UPDATE ON public.app_settings TO planning_app;
 GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON public.employees TO planning_app;
 GRANT SELECT ON public.mandatory_doc_signatures TO planning_app;

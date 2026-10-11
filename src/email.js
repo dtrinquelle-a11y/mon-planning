@@ -343,7 +343,25 @@ function sendAccessLink({ to, firstName, url }) {
   });
 }
 
+// Email : conges payes poses d'office pour une fermeture de l'entreprise
+function sendClosureLeave({ to, employeeName, label, periodLabel }) {
+  return send('fermeture entreprise', {
+    to,
+    subject: 'Conges payes : ' + label,
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(employeeName)},</p>
+          <p>L'entreprise sera fermee et des conges payes ont ete poses pour vous :</p>
+          <div class="highlight"><strong>${esc(label)}</strong><br>${esc(periodLabel)}</div>
+          <p>Ils apparaissent deja dans votre planning et dans l'onglet <strong>Absences</strong>. Pour toute question, rapprochez-vous de votre responsable.</p>
+          <a href="${APP_URL}" class="btn">Voir mes absences</a>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendClosureLeave,
   sendAccessLink,
   sendWeekToConfirm,
   sendDocsToSign,
