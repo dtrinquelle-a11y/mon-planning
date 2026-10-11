@@ -14,7 +14,11 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  max: 10,                          // connexions simultanees au maximum
+  idleTimeoutMillis: 30000,         // libere les connexions inutilisees
+  connectionTimeoutMillis: 10000,   // n'attend pas indefiniment une base injoignable
+  statement_timeout: 30000,         // une requete bloquee est interrompue au bout de 30 s
 });
 
 pool.on('error', err => console.error('Erreur DB :', err.message));
