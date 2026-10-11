@@ -24,6 +24,7 @@ const absencesRouter = require('./routes/absences');
 const exportsRouter = require('./routes/exports');
 const reportsRouter = require('./routes/reports');
 const mandatoryDocsRouter = require('./routes/mandatoryDocs');
+const pushRouter = require('./routes/push');
 
 // Health check (public) : /health = le serveur repond ; /health?db=1 = il joint aussi la base (surveillance externe)
 app.get('/health', async (req, res) => {
@@ -46,6 +47,7 @@ app.use('/api/absences', absencesRouter);
 app.use('/api/exports', exportsRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/mandatory-docs', mandatoryDocsRouter);
+app.use('/api/push', pushRouter);
 
 // Toute erreur non prevue dans une route : reponse JSON propre, le serveur continue de tourner
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars

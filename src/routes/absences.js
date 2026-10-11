@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { sendAbsenceRequested, sendAbsenceDecided, sendAbsenceChanged, sendClosureLeave } = require('../email');
 const { managerOnly } = require('../auth');
+const { notifyEmployees, notifyManagers } = require('../push');
 
 const TYPE_LABELS = {
   conge_paye: 'Conges payes', repos: 'Repos / recuperation', indisponibilite: 'Indisponibilite',
@@ -31,6 +32,7 @@ router.post('/notify', async (req, res) => {
       // Le salarie ne peut notifier que pour sa propre demande
       if (req.user && !req.user.isManager && req.user.employeeId !== a.employee_id) return res.status(403).json({ error: 'Acces refuse' });
       if (a.status !== 'en_attente') return res.json({ sent: 0 });
+      notifyManagers({ title: "Demande d'absence", body: employeeName + ' : ' + typeLabel.toLowerCase() + ', ' + periodLabel(a).toLowerCase(), tag: 'absence-' + a.id });
       const results = await Promise.all((a.manager_emails || []).map(to =>
         sendAbsenceRequested({ to, employeeName, employeeEmail: a.email && !a.email.endsWith('@temp.fr') ? a.email : null, typeLabel, periodLabel: periodLabel(a), comment: a.comment })));
       return res.json({ sent: results.filter(Boolean).length });
@@ -38,6 +40,10 @@ router.post('/notify', async (req, res) => {
 
     // Evenements suivants : reserves aux managers
     if (req.user && !req.user.isManager) return res.status(403).json({ error: 'Reserve aux managers' });
+    // Notification sur le telephone du salarie (meme sans email)
+    const pushTitle = event === 'cancelled' ? 'Absence annulée' : event === 'modified' ? 'Absence modifiée'
+      : a.status === 'acceptee' ? 'Absence acceptée' : a.status === 'refusee' ? 'Absence refusée' : null;
+    if (pushTitle) notifyEmployees([a.employee_id], { title: pushTitle, body: typeLabel + ' · ' + periodLabel(a).toLowerCase() + (a.manager_comment ? ' · ' + a.manager_comment : ''), tag: 'absence-' + a.id });
     if (!a.email || a.email.endsWith('@temp.fr')) return res.json({ sent: 0 });
 
     // Absence deja acceptee puis modifiee ou annulee par l'employeur
@@ -64,6 +70,8 @@ router.post('/closure-notify', managerOnly, async (req, res) => {
       `SELECT a.start_date, a.end_date, a.comment, e.first_name, e.last_name, e.email
          FROM absence_requests a JOIN employees e ON e.id = a.employee_id
         WHERE a.closure_id = $1 AND a.status = 'acceptee'`, [id]);
+    const ids = await pool.query("SELECT DISTINCT employee_id FROM absence_requests WHERE closure_id = $1 AND status = 'acceptee'", [id]);
+    if (rows[0]) notifyEmployees(ids.rows.map(r => r.employee_id), { title: 'Congés payés posés', body: (rows[0].comment || "Fermeture de l'entreprise") + ' · ' + periodLabel(rows[0]).toLowerCase(), tag: 'fermeture-' + id });
     let sent = 0;
     for (const a of rows) {
       if (!a.email || a.email.endsWith('@temp.fr')) continue;

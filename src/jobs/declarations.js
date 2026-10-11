@@ -1,5 +1,6 @@
 const { pool, TZ } = require('../db');
 const { sendWeekToConfirm } = require('../email');
+const { notifyEmployees } = require('../push');
 
 // Pointeuse desactivee (mode "horaires declares") :
 // - dimanche 18 h (heure de Paris) : email a chaque salarie avec le recapitulatif de sa semaine et les journees a valider ;
@@ -39,6 +40,8 @@ async function sendSundayEmails(sunday) {
   const weekLabel = frShort(mondayIso) + ' au ' + frShort(sunday);
   let sent = 0;
   for (const { e, days } of Object.values(byEmp)) {
+    const todo = days.filter(d => !d.status).length;
+    if (todo) notifyEmployees([e.id], { title: 'Horaires à valider', body: todo + ' journée' + (todo > 1 ? 's' : '') + ' à valider avant lundi 12 h', tag: 'horaires' });
     if (!e.email || e.email.endsWith('@temp.fr')) continue;
     const list = days.map(d => ({
       day: frShort(dateStr(d.work_date)),

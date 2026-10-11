@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { managerOnly } = require('../auth');
 const { sendDocumentAvailable } = require('../email');
+const { notifyEmployees } = require('../push');
 
 const TYPE_LABELS = {
   bulletin_paie: 'Bulletin de paie', contrat: 'Contrat', avenant: 'Avenant',
@@ -19,12 +20,13 @@ router.post('/notify', managerOnly, async (req, res) => {
     const { rows } = await pool.query('SELECT first_name, last_name, email FROM employees WHERE id = $1', [employee_id]);
     const emp = rows[0];
     if (!emp) return res.status(404).json({ error: 'Salarie introuvable' });
-    if (!emp.email || emp.email.endsWith('@temp.fr')) return res.json({ sent: false, reason: 'pas d\'email' });
 
     const m = /^(\d{4})-(\d{2})$/.exec(periode || '');
     const docLabel = type === 'bulletin_paie' && m
       ? 'Bulletin de paie de ' + MOIS[parseInt(m[2], 10) - 1] + ' ' + m[1]
       : (title || TYPE_LABELS[type] || 'Document');
+    notifyEmployees([employee_id], { title: 'Nouveau document', body: docLabel + ' · onglet Mes documents', tag: 'document' });
+    if (!emp.email || emp.email.endsWith('@temp.fr')) return res.json({ sent: false, reason: 'pas d\'email' });
 
     const sent = await sendDocumentAvailable({ to: emp.email, employeeName: emp.first_name + ' ' + emp.last_name, docLabel });
     res.json({ sent });

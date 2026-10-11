@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { managerOnly } = require('../auth');
 const { sendDocsToSign } = require('../email');
+const { notifyEmployees } = require('../push');
 
 // POST /api/mandatory-docs/remind  body: { doc_id? }
 // Email aux salaries actifs qui n'ont pas (ou plus) de signature valide : un document precis, ou tous si doc_id absent.
@@ -26,6 +27,7 @@ router.post('/remind', managerOnly, async (req, res) => {
     );
     let sent = 0, noEmail = 0;
     for (const e of rows) {
+      notifyEmployees([e.id], { title: e.titles.length > 1 ? e.titles.length + ' documents à signer' : 'Document à signer', body: e.titles.join(', '), tag: 'signer' });
       if (!e.email || e.email.endsWith('@temp.fr')) { noEmail++; continue; }
       if (await sendDocsToSign({ to: e.email, employeeName: e.first_name + ' ' + e.last_name, titles: e.titles })) sent++;
     }

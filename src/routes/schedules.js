@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool, TZ } = require('../db');
 const { sendPlanningPublished, sendShiftModified } = require('../email');
 const { managerOnly, isEmployeeScoped } = require('../auth');
+const { notifyEmployees } = require('../push');
 
 // Erreur base de donnees -> message lisible (doublon : meme salarie, meme jour, meme heure de debut)
 function sendDbError(res, err) {
@@ -162,6 +163,9 @@ router.patch('/:id', managerOnly, async (req, res) => {
     const before = old.rows[0];
     const after = result.rows[0];
     const timeChanged = before && (before.start_time !== after.start_time || before.end_time !== after.end_time);
+    if (timeChanged && before.is_published) {
+      notifyEmployees([before.employee_id], { title: 'Créneau modifié', body: formatDate(after.work_date) + ' : ' + String(after.start_time).slice(0, 5) + ' - ' + String(after.end_time).slice(0, 5), tag: 'creneau-' + after.id });
+    }
     if (timeChanged && before.is_published && before.email && !before.email.endsWith('@temp.fr')) {
       sendShiftModified({
         to: before.email,
@@ -193,8 +197,10 @@ router.post('/publish', managerOnly, async (req, res) => {
     const result = await pool.query(`
       UPDATE schedules SET is_published = true
       WHERE work_date >= $1::date AND work_date < $1::date + INTERVAL '7 days'
-      AND is_published = false RETURNING id
+      AND is_published = false RETURNING id, employee_id
     `, [week]);
+    const [y, mo, d] = String(week).slice(0, 10).split('-');
+    notifyEmployees(result.rows.map(r => r.employee_id), { title: 'Planning publié', body: 'Votre planning de la semaine du ' + d + '/' + mo + ' est disponible', tag: 'planning-' + week });
     const byEmp = {};
     toNotify.rows.forEach(s => {
       if (!byEmp[s.employee_id]) byEmp[s.employee_id] = { email: s.email, name: s.first_name + ' ' + s.last_name, count: 0 };

@@ -1,5 +1,6 @@
 const { pool } = require('../db');
 const { sendTimeclockMissing } = require('../email');
+const { notifyManagers } = require('../push');
 
 // Alerte "oubli de pointage" : activee depuis la page Realise (reglage app_settings "alertes_pointage" :
 // { enabled: true|false, delay_min: 15|30|60 }). Toutes les 5 minutes, les creneaux publies du jour sans
@@ -21,8 +22,9 @@ async function checkTimeclockAlerts() {
     const recipients = a.manager_emails || [];
     const results = await Promise.all(recipients.map(to =>
       sendTimeclockMissing({ to, employeeName: a.employee_name, kind: a.kind, dateLabel, shiftLabel })));
+    const pushed = await notifyManagers({ title: 'Pointage manquant', body: a.employee_name + ' : ' + (a.kind === 'arrivee' ? 'arrivée' : 'départ') + ' non pointé (' + shiftLabel + ')', tag: 'pointage-' + a.schedule_id });
     // Note l'alerte comme envoyee des qu'au moins un manager l'a recue (evite les doublons)
-    if (results.some(Boolean)) await pool.query('SELECT public.mark_timeclock_alert($1, $2)', [a.schedule_id, a.kind]);
+    if (results.some(Boolean) || pushed > 0) await pool.query('SELECT public.mark_timeclock_alert($1, $2)', [a.schedule_id, a.kind]);
   }
 }
 
