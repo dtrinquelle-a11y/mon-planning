@@ -61,7 +61,10 @@ function baseTemplate(content) {
 </head>
 <body>
   <div class="container">
-    <div class="logo"><span class="logo-badge">HPA</span>Planning · Le Bout du Monde</div>
+    <div class="logo">
+      <img src="${APP_URL}/logo-email.png" width="180" alt="Le Bout du Monde" style="display:block;width:180px;height:auto;border:0;margin-bottom:10px">
+      <span class="logo-badge">HPA</span>Planning
+    </div>
     ${content}
     <div class="footer">Le Bout du Monde · 2 chemin de Rhodes, 11400 Verdun-en-Lauragais<br>Une question ? Repondez simplement a cet email.</div>
   </div>
