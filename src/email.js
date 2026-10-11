@@ -323,7 +323,25 @@ function sendWeekToConfirm({ to, employeeName, weekLabel, days, pending, lockLab
   });
 }
 
+// Email : lien personnel de premier acces a l'application (envoye depuis Dossiers RH)
+function sendAccessLink({ to, firstName, url }) {
+  return send('lien acces', {
+    to,
+    subject: 'Votre acces a l\'application Planning HPA',
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(firstName)},</p>
+          <p>Voici votre lien personnel pour creer votre acces a l'application Planning HPA (planning, horaires, absences, documents) :</p>
+          <a href="${esc(url)}" class="btn">Creer mon acces</a>
+          <div class="warning">Ce lien est valable <strong>7 jours</strong> et utilisable <strong>une seule fois</strong>. Ne le transmettez a personne.</div>
+          <p style="font-size:13px;color:#6B7280">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>${esc(url)}</p>
+        </div>
+      `)
+  });
+}
+
 module.exports = {
+  sendAccessLink,
   sendWeekToConfirm,
   sendDocsToSign,
   sendTimeclockMissing,

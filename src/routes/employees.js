@@ -2,6 +2,26 @@ const express = require('express');
 const router = express.Router();
 const { pool, TODAY_SQL } = require('../db');
 const { managerOnly, isEmployeeScoped } = require('../auth');
+const { sendAccessLink } = require('../email');
+
+// POST /api/employees/:id/access-link-email  body: { email, url }
+// Envoie par email le lien de premier acces genere dans Dossiers RH
+router.post('/:id/access-link-email', managerOnly, async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const url = String(req.body.url || '');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Adresse email invalide' });
+  // Seul un lien d'acces de l'application est accepte (pas de lien arbitraire envoye depuis notre domaine)
+  if (!/^https:\/\/[a-z0-9.-]+\/onboarding\?acces=[0-9a-f]{48}$/.test(url)) return res.status(400).json({ error: 'Lien invalide' });
+  const allowed = [process.env.FRONTEND_URL, ...(process.env.CORS_ORIGIN || '').split(',')].filter(Boolean).map(o => o.trim().replace(/\/$/, ''));
+  if (allowed.length && !allowed.includes(new URL(url).origin)) return res.status(400).json({ error: 'Lien invalide' });
+  try {
+    const { rows } = await pool.query('SELECT first_name FROM employees WHERE id = $1', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Salarie introuvable' });
+    const sent = await sendAccessLink({ to: email, firstName: rows[0].first_name, url });
+    if (!sent) return res.status(502).json({ error: "L'email n'a pas pu etre envoye" });
+    res.json({ sent: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 // GET /api/employees
 router.get('/', managerOnly, async (req, res) => {
   try {
