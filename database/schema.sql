@@ -1,4 +1,4 @@
--- Structure Planning HPA, generee le 11/10/2026 16:29
+-- Structure Planning HPA, generee le 12/10/2026 14:23
 -- A executer sur un projet Supabase NEUF (SQL Editor), avant la restauration des donnees.
 -- Apres execution : definir le mot de passe du role planning_app (ALTER ROLE planning_app PASSWORD ...)
 -- et mettre a jour DATABASE_URL du backend.
@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS public.changelog (
   created_at timestamp with time zone DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.contract_templates (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  file_path text NOT NULL,
+  file_name text NOT NULL,
+  last_values jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  created_by uuid DEFAULT auth.uid()
+);
+
 CREATE TABLE IF NOT EXISTS public.data_backups (
   slot text NOT NULL,
   kind text NOT NULL,
@@ -113,7 +123,15 @@ CREATE TABLE IF NOT EXISTS public.employees (
   is_temp boolean DEFAULT false,
   contract_end_date date,
   docs_reminder_sent_for date,
-  docs_closed_sent_for date
+  docs_closed_sent_for date,
+  emploi_repere text,
+  categorie text,
+  coefficient integer,
+  salaire_horaire numeric(8,2),
+  periode_essai text,
+  taches text,
+  logement boolean NOT NULL DEFAULT false,
+  logement_details text
 );
 
 CREATE TABLE IF NOT EXISTS public.mandatory_doc_signatures (
@@ -236,6 +254,16 @@ CREATE TABLE IF NOT EXISTS public.pointage_sites (
   created_at timestamp with time zone DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  endpoint text NOT NULL,
+  p256dh text NOT NULL,
+  auth text NOT NULL,
+  user_agent text,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.schedules (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   employee_id uuid NOT NULL,
@@ -248,6 +276,12 @@ CREATE TABLE IF NOT EXISTS public.schedules (
   note text,
   created_at timestamp with time zone DEFAULT now(),
   service text
+);
+
+CREATE TABLE IF NOT EXISTS public.server_secrets (
+  key text NOT NULL,
+  value text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.timeclock (
@@ -330,6 +364,7 @@ ALTER TABLE public.access_links ADD CONSTRAINT access_links_pkey PRIMARY KEY (id
 ALTER TABLE public.app_settings ADD CONSTRAINT app_settings_pkey PRIMARY KEY (key);
 ALTER TABLE public.availabilities ADD CONSTRAINT availabilities_pkey PRIMARY KEY (employee_id, day);
 ALTER TABLE public.changelog ADD CONSTRAINT changelog_pkey PRIMARY KEY (id);
+ALTER TABLE public.contract_templates ADD CONSTRAINT contract_templates_pkey PRIMARY KEY (id);
 ALTER TABLE public.data_backups ADD CONSTRAINT data_backups_pkey PRIMARY KEY (slot);
 ALTER TABLE public.dev_notes ADD CONSTRAINT dev_notes_pkey PRIMARY KEY (id);
 ALTER TABLE public.documents ADD CONSTRAINT documents_pkey PRIMARY KEY (id);
@@ -345,7 +380,9 @@ ALTER TABLE public.planning_preferences ADD CONSTRAINT planning_preferences_pkey
 ALTER TABLE public.planning_sector_members ADD CONSTRAINT planning_sector_members_pkey PRIMARY KEY (id);
 ALTER TABLE public.planning_visibility ADD CONSTRAINT planning_visibility_pkey PRIMARY KEY (id);
 ALTER TABLE public.pointage_sites ADD CONSTRAINT pointage_sites_pkey PRIMARY KEY (id);
+ALTER TABLE public.push_subscriptions ADD CONSTRAINT push_subscriptions_pkey PRIMARY KEY (id);
 ALTER TABLE public.schedules ADD CONSTRAINT schedules_pkey PRIMARY KEY (id);
+ALTER TABLE public.server_secrets ADD CONSTRAINT server_secrets_pkey PRIMARY KEY (key);
 ALTER TABLE public.timeclock ADD CONSTRAINT timeclock_pkey PRIMARY KEY (id);
 ALTER TABLE public.timeclock_alerts ADD CONSTRAINT timeclock_alerts_pkey PRIMARY KEY (schedule_id, kind);
 ALTER TABLE public.user_profiles ADD CONSTRAINT user_profiles_pkey PRIMARY KEY (id);
@@ -360,6 +397,7 @@ ALTER TABLE public.onboarding_responses ADD CONSTRAINT onboarding_responses_empl
 ALTER TABLE public.planning_preferences ADD CONSTRAINT planning_preferences_service_key UNIQUE (service);
 ALTER TABLE public.planning_sector_members ADD CONSTRAINT planning_sector_members_service_employee_id_key UNIQUE (service, employee_id);
 ALTER TABLE public.planning_visibility ADD CONSTRAINT planning_visibility_employee_id_service_week_start_key UNIQUE (employee_id, service, week_start);
+ALTER TABLE public.push_subscriptions ADD CONSTRAINT push_subscriptions_endpoint_key UNIQUE (endpoint);
 ALTER TABLE public.schedules ADD CONSTRAINT no_overlap UNIQUE (employee_id, work_date, start_time);
 ALTER TABLE public.work_declarations ADD CONSTRAINT work_declarations_schedule_id_key UNIQUE (schedule_id);
 ALTER TABLE public.absence_requests ADD CONSTRAINT absence_requests_check CHECK ((end_date >= start_date));
@@ -368,6 +406,8 @@ ALTER TABLE public.absence_requests ADD CONSTRAINT absence_requests_type_check C
 ALTER TABLE public.availabilities ADD CONSTRAINT availabilities_status_check CHECK ((status = ANY (ARRAY['dispo'::text, 'matin'::text, 'apres_midi'::text, 'indispo'::text])));
 ALTER TABLE public.data_backups ADD CONSTRAINT data_backups_kind_check CHECK ((kind = ANY (ARRAY['auto'::text, 'manuel'::text])));
 ALTER TABLE public.documents ADD CONSTRAINT documents_type_check CHECK ((type = ANY (ARRAY['bulletin_paie'::text, 'contrat'::text, 'avenant'::text, 'attestation'::text, 'certificat'::text, 'autre'::text])));
+ALTER TABLE public.employees ADD CONSTRAINT employees_coefficient_check CHECK (((coefficient IS NULL) OR ((coefficient >= 100) AND (coefficient <= 700))));
+ALTER TABLE public.employees ADD CONSTRAINT employees_salaire_horaire_check CHECK (((salaire_horaire IS NULL) OR (salaire_horaire > (0)::numeric)));
 ALTER TABLE public.employees ADD CONSTRAINT employees_service_check CHECK ((service = ANY (ARRAY['Accueil'::text, 'Housekeeping'::text, 'Technique'::text, 'Restauration'::text, 'Animation'::text, 'Managers'::text, 'Non defini'::text])));
 ALTER TABLE public.mandatory_doc_signatures ADD CONSTRAINT mandatory_doc_signatures_method_check CHECK ((method = ANY (ARRAY['en_ligne'::text, 'papier'::text])));
 ALTER TABLE public.mandatory_docs ADD CONSTRAINT mandatory_docs_check CHECK ((((kind = 'fichier'::text) AND (file_path IS NOT NULL)) OR ((kind = 'video'::text) AND (video_url IS NOT NULL))));
@@ -398,6 +438,7 @@ ALTER TABLE public.onboarding_responses ADD CONSTRAINT onboarding_responses_fiel
 ALTER TABLE public.payroll_months ADD CONSTRAINT payroll_months_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
 ALTER TABLE public.planning_sector_members ADD CONSTRAINT planning_sector_members_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
 ALTER TABLE public.planning_visibility ADD CONSTRAINT planning_visibility_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
+ALTER TABLE public.push_subscriptions ADD CONSTRAINT push_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.schedules ADD CONSTRAINT schedules_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
 ALTER TABLE public.timeclock ADD CONSTRAINT timeclock_declaration_id_fkey FOREIGN KEY (declaration_id) REFERENCES work_declarations(id) ON DELETE CASCADE;
 ALTER TABLE public.timeclock ADD CONSTRAINT timeclock_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
@@ -414,6 +455,7 @@ ALTER TABLE public.work_declarations ADD CONSTRAINT work_declarations_schedule_i
 CREATE INDEX absence_requests_closure ON public.absence_requests USING btree (closure_id) WHERE (closure_id IS NOT NULL);
 CREATE INDEX absence_requests_dates_idx ON public.absence_requests USING btree (start_date, end_date);
 CREATE INDEX mandatory_doc_signatures_doc_emp ON public.mandatory_doc_signatures USING btree (doc_id, employee_id, signed_at DESC);
+CREATE INDEX push_subscriptions_user ON public.push_subscriptions USING btree (user_id);
 CREATE INDEX work_declaration_history_decl ON public.work_declaration_history USING btree (declaration_id, declared_at);
 CREATE INDEX work_declarations_emp_date ON public.work_declarations USING btree (employee_id, work_date);
 
@@ -586,7 +628,7 @@ DECLARE
   v_tables text[] := ARRAY['employees','schedules','timeclock','modulation_counter','absence_requests','payroll_months',
     'documents','onboarding_fields','onboarding_responses','onboarding_invitations','app_settings','user_profiles',
     'week_templates','access_links','planning_visibility','planning_preferences','planning_sector_members',
-    'pointage_sites','timeclock_alerts','changelog','dev_notes','mandatory_docs','mandatory_doc_signatures','work_declarations','work_declaration_history'];
+    'pointage_sites','timeclock_alerts','changelog','dev_notes','mandatory_docs','mandatory_doc_signatures','work_declarations','work_declaration_history','contract_templates'];
   v_t text; v_rows json; v_data jsonb := '{}'::jsonb; v_counts jsonb := '{}'::jsonb; v_slot text; v_size integer;
 BEGIN
   IF NOT (session_user = 'planning_app' OR public.is_manager()) THEN RAISE EXCEPTION 'Reserve aux managers'; END IF;
@@ -699,6 +741,16 @@ BEGIN
   DELETE FROM public.employees WHERE id = p_employee_id;
   RETURN v_files;
 END;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.delete_push_subscription(p_endpoint text)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  DELETE FROM public.push_subscriptions WHERE endpoint = p_endpoint AND user_id = auth.uid();
 $function$
 ;
 
@@ -995,10 +1047,43 @@ BEGIN
     NEW.services_secondaires := OLD.services_secondaires; NEW.contract_hours := OLD.contract_hours;
     NEW.contract_type := OLD.contract_type; NEW.hire_date := OLD.hire_date; NEW.is_active := OLD.is_active;
     NEW.is_temp := OLD.is_temp; NEW.sort_order := OLD.sort_order; NEW.contract_end_date := OLD.contract_end_date;
+    NEW.emploi_repere := OLD.emploi_repere; NEW.categorie := OLD.categorie; NEW.coefficient := OLD.coefficient;
+    NEW.salaire_horaire := OLD.salaire_horaire; NEW.periode_essai := OLD.periode_essai; NEW.taches := OLD.taches;
+    NEW.logement := OLD.logement; NEW.logement_details := OLD.logement_details;
   END IF;
   RETURN NEW;
 END;
 $function$
+;
+
+CREATE OR REPLACE FUNCTION public.protect_employee_insert()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF current_user = 'authenticated' AND NOT public.is_manager() THEN
+    NEW.emploi_repere := NULL; NEW.categorie := NULL; NEW.coefficient := NULL; NEW.salaire_horaire := NULL;
+    NEW.periode_essai := NULL; NEW.taches := NULL; NEW.logement := false; NEW.logement_details := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text DEFAULT NULL::text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Non connecte'; END IF;
+  IF p_endpoint !~ '^https://' THEN RAISE EXCEPTION 'Abonnement invalide'; END IF;
+  INSERT INTO public.push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+  VALUES (auth.uid(), p_endpoint, p_p256dh, p_auth, left(p_user_agent, 300))
+  ON CONFLICT (endpoint) DO UPDATE SET user_id = auth.uid(), p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, user_agent = EXCLUDED.user_agent, created_at = now();
+END $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone)
@@ -1103,6 +1188,7 @@ CREATE TRIGGER check_cp_blackout BEFORE INSERT ON public.absence_requests FOR EA
 CREATE TRIGGER keep_declaration_history BEFORE UPDATE ON public.work_declarations FOR EACH ROW EXECUTE FUNCTION keep_declaration_history();
 CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION create_user_profile();
 CREATE TRIGGER protect_employee_fields BEFORE UPDATE ON public.employees FOR EACH ROW EXECUTE FUNCTION protect_employee_fields();
+CREATE TRIGGER protect_employee_insert BEFORE INSERT ON public.employees FOR EACH ROW EXECUTE FUNCTION protect_employee_insert();
 CREATE TRIGGER stamp_doc_signature BEFORE INSERT ON public.mandatory_doc_signatures FOR EACH ROW EXECUTE FUNCTION stamp_doc_signature();
 CREATE TRIGGER sync_declaration_timeclock AFTER INSERT OR DELETE OR UPDATE ON public.work_declarations FOR EACH ROW EXECUTE FUNCTION sync_declaration_timeclock();
 
@@ -1112,6 +1198,7 @@ ALTER TABLE public.access_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.availabilities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.changelog ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contract_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.data_backups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.dev_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
@@ -1127,7 +1214,9 @@ ALTER TABLE public.planning_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.planning_sector_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.planning_visibility ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pointage_sites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.server_secrets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.timeclock ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.timeclock_alerts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
@@ -1138,6 +1227,7 @@ ALTER TABLE public.work_declarations ENABLE ROW LEVEL SECURITY;
 -- ===== Stockage des documents =====
 INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('documents-communs', 'documents-communs', 'f', 52428800) ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('documents-rh', 'documents-rh', 'f', NULL) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('modeles-contrats', 'modeles-contrats', 'f', 10485760) ON CONFLICT (id) DO NOTHING;
 
 -- ===== Regles d'acces =====
 CREATE POLICY "Acces lecture absences" ON public.absence_requests AS PERMISSIVE FOR SELECT TO planning_app USING (true);
@@ -1156,6 +1246,7 @@ CREATE POLICY "Salarie voit ses disponibilites" ON public.availabilities AS PERM
 CREATE POLICY "Acces changelog" ON public.changelog AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Lecture connectes" ON public.changelog AS PERMISSIVE FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Manager" ON public.changelog AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
+CREATE POLICY "Manager" ON public.contract_templates AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Manager lecture" ON public.data_backups AS PERMISSIVE FOR SELECT TO authenticated USING (is_manager());
 CREATE POLICY "Acces dev notes" ON public.dev_notes AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Lecture connectes" ON public.dev_notes AS PERMISSIVE FOR SELECT TO authenticated USING (true);
@@ -1214,9 +1305,12 @@ CREATE POLICY "Acces planning visibility" ON public.planning_visibility AS PERMI
 CREATE POLICY "Manager" ON public.planning_visibility AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Acces pointage sites" ON public.pointage_sites AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Manager" ON public.pointage_sites AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
+CREATE POLICY "Acces abonnements" ON public.push_subscriptions AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
+CREATE POLICY "Voit ses appareils" ON public.push_subscriptions AS PERMISSIVE FOR SELECT TO authenticated USING ((user_id = auth.uid()));
 CREATE POLICY "Acces schedules" ON public.schedules AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Manager" ON public.schedules AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Salarie voit ses creneaux" ON public.schedules AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
+CREATE POLICY "Serveur uniquement" ON public.server_secrets AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Acces timeclock" ON public.timeclock AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Manager" ON public.timeclock AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Salarie voit ses pointages" ON public.timeclock AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
@@ -1241,6 +1335,10 @@ CREATE POLICY "Communs depot manager" ON storage.objects AS PERMISSIVE FOR INSER
 CREATE POLICY "Communs lecture" ON storage.objects AS PERMISSIVE FOR SELECT TO authenticated USING ((bucket_id = 'documents-communs'::text));
 CREATE POLICY "Communs remplacement manager" ON storage.objects AS PERMISSIVE FOR UPDATE TO authenticated USING (((bucket_id = 'documents-communs'::text) AND is_manager())) WITH CHECK (((bucket_id = 'documents-communs'::text) AND is_manager()));
 CREATE POLICY "Communs suppression manager" ON storage.objects AS PERMISSIVE FOR DELETE TO authenticated USING (((bucket_id = 'documents-communs'::text) AND is_manager()));
+CREATE POLICY "Modeles contrats depot manager" ON storage.objects AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((bucket_id = 'modeles-contrats'::text) AND is_manager()));
+CREATE POLICY "Modeles contrats lecture manager" ON storage.objects AS PERMISSIVE FOR SELECT TO authenticated USING (((bucket_id = 'modeles-contrats'::text) AND is_manager()));
+CREATE POLICY "Modeles contrats remplacement manager" ON storage.objects AS PERMISSIVE FOR UPDATE TO authenticated USING (((bucket_id = 'modeles-contrats'::text) AND is_manager())) WITH CHECK (((bucket_id = 'modeles-contrats'::text) AND is_manager()));
+CREATE POLICY "Modeles contrats suppression manager" ON storage.objects AS PERMISSIVE FOR DELETE TO authenticated USING (((bucket_id = 'modeles-contrats'::text) AND is_manager()));
 CREATE POLICY "RH acces salarie limite a 3 mois apres contrat" ON storage.objects AS RESTRICTIVE FOR SELECT TO authenticated USING (((bucket_id <> 'documents-rh'::text) OR is_manager() OR my_documents_accessible()));
 CREATE POLICY "RH cloisonnement depot" ON storage.objects AS RESTRICTIVE FOR INSERT TO authenticated WITH CHECK (((bucket_id <> 'documents-rh'::text) OR is_manager() OR ((storage.foldername(name))[1] = (my_employee_id())::text)));
 CREATE POLICY "RH cloisonnement lecture" ON storage.objects AS RESTRICTIVE FOR SELECT TO authenticated USING (((bucket_id <> 'documents-rh'::text) OR is_manager() OR ((storage.foldername(name))[1] = (my_employee_id())::text)));
@@ -1259,7 +1357,9 @@ GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON public.em
 GRANT SELECT ON public.mandatory_doc_signatures TO planning_app;
 GRANT SELECT ON public.mandatory_docs TO planning_app;
 GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON public.modulation_counter TO planning_app;
+GRANT DELETE, SELECT ON public.push_subscriptions TO planning_app;
 GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON public.schedules TO planning_app;
+GRANT INSERT, SELECT ON public.server_secrets TO planning_app;
 GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON public.timeclock TO planning_app;
 GRANT SELECT ON public.user_profiles TO planning_app;
 GRANT SELECT ON public.work_declaration_history TO planning_app;
@@ -1277,6 +1377,7 @@ REVOKE ALL ON FUNCTION public.create_user_profile() FROM PUBLIC, anon, authentic
 REVOKE ALL ON FUNCTION public.declaration_lock_at(p_date date) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.declare_work(p_schedule_id uuid, p_status text, p_start time without time zone, p_end time without time zone, p_break integer, p_comment text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.delete_employee(p_employee_id uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.delete_push_subscription(p_endpoint text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.docs_access_candidates() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.employees_last_sign_in() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.export_schema_sql() FROM PUBLIC, anon, authenticated;
@@ -1288,6 +1389,8 @@ REVOKE ALL ON FUNCTION public.my_employee_id() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.pending_timeclock_alerts(p_delay integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.process_timeclock_scan(p_employee_id uuid, p_action text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.protect_employee_fields() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.protect_employee_insert() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.stamp_doc_signature() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.sync_declaration_timeclock() FROM PUBLIC, anon, authenticated;
@@ -1325,6 +1428,8 @@ GRANT EXECUTE ON FUNCTION public.declare_work(p_schedule_id uuid, p_status text,
 GRANT EXECUTE ON FUNCTION public.declare_work(p_schedule_id uuid, p_status text, p_start time without time zone, p_end time without time zone, p_break integer, p_comment text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.delete_employee(p_employee_id uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_employee(p_employee_id uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.delete_push_subscription(p_endpoint text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_push_subscription(p_endpoint text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.docs_access_candidates() TO planning_app;
 GRANT EXECUTE ON FUNCTION public.docs_access_candidates() TO service_role;
 GRANT EXECUTE ON FUNCTION public.employees_last_sign_in() TO authenticated;
@@ -1353,6 +1458,9 @@ GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO anon;
 GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO service_role;
+GRANT EXECUTE ON FUNCTION public.protect_employee_insert() TO service_role;
+GRANT EXECUTE ON FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) TO PUBLIC;
 GRANT EXECUTE ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) TO anon;
 GRANT EXECUTE ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) TO authenticated;
