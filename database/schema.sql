@@ -1,4 +1,4 @@
--- Structure Planning HPA, generee le 13/10/2026 21:44
+-- Structure Planning HPA, generee le 13/10/2026 22:02
 -- A executer sur un projet Supabase NEUF (SQL Editor), avant la restauration des donnees.
 -- Apres execution : definir le mot de passe du role planning_app (ALTER ROLE planning_app PASSWORD ...)
 -- et mettre a jour DATABASE_URL du backend.
@@ -152,7 +152,8 @@ CREATE TABLE IF NOT EXISTS public.employees (
   nss_enc bytea,
   cp_init_date date,
   cp_init_n1 numeric(6,2),
-  cp_init_n numeric(6,2)
+  cp_init_n numeric(6,2),
+  archived_at timestamp with time zone
 );
 
 CREATE TABLE IF NOT EXISTS public.mandatory_doc_signatures (
@@ -578,7 +579,10 @@ CREATE OR REPLACE FUNCTION public.can_claim_employee(p_email text, p_active bool
  STABLE SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
-  SELECT auth.uid() IS NOT NULL AND public.my_employee_id() IS NULL AND p_active = false AND lower(p_email) = lower(auth.jwt() ->> 'email');
+  SELECT auth.uid() IS NOT NULL AND public.my_employee_id() IS NULL AND p_active = false
+     AND lower(p_email) = lower(auth.jwt() ->> 'email')
+     -- une fiche archivee (salarie parti) ne peut pas etre reprise par une inscription
+     AND NOT EXISTS (SELECT 1 FROM public.employees e WHERE lower(e.email) = lower(p_email) AND e.archived_at IS NOT NULL);
 $function$
 ;
 
@@ -1263,6 +1267,7 @@ BEGIN
     NEW.contrat_signe_debut := OLD.contrat_signe_debut; NEW.contrat_signe_doc := OLD.contrat_signe_doc;
     NEW.logement_pieces := OLD.logement_pieces; NEW.caution_recue_at := OLD.caution_recue_at; NEW.nss_enc := OLD.nss_enc;
     NEW.cp_init_date := OLD.cp_init_date; NEW.cp_init_n1 := OLD.cp_init_n1; NEW.cp_init_n := OLD.cp_init_n;
+    NEW.archived_at := OLD.archived_at;
   END IF;
   RETURN NEW;
 END;
@@ -1493,7 +1498,7 @@ CREATE OR REPLACE FUNCTION public.sync_personnel_register()
 AS $function$
 DECLARE last public.personnel_register; r jsonb; v_sexe text;
 BEGIN
-  IF NOT NEW.is_active OR NEW.is_temp OR NEW.hire_date IS NULL THEN RETURN NEW; END IF;
+  IF (NOT NEW.is_active AND NEW.archived_at IS NULL) OR NEW.is_temp OR NEW.hire_date IS NULL THEN RETURN NEW; END IF;
   SELECT jsonb_object_agg(f.label, o.value) INTO r
     FROM public.onboarding_responses o JOIN public.onboarding_fields f ON f.id = o.field_id WHERE o.employee_id = NEW.id;
   r := COALESCE(r, '{}'::jsonb);

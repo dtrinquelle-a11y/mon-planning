@@ -22,7 +22,7 @@ router.post('/:id/access-link-email', managerOnly, requirePerm('dossiers_rh'), a
     res.json({ sent: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-// GET /api/employees
+// GET /api/employees (?archived=1 pour inclure les salaries archives)
 router.get('/', managerOnly, async (req, res) => {
   try {
     const result = await pool.query(
@@ -30,7 +30,7 @@ router.get('/', managerOnly, async (req, res) => {
               e.contract_hours, e.contract_type, e.hire_date,
               e.is_active, e.service, e.services_secondaires,
               e.phone, e.address, e.birth_date, e.onboarding_completed,
-              e.sort_order, e.is_temp,
+              e.sort_order, e.is_temp, e.archived_at,
               COALESCE(m.worked_hours, 0) AS heures_travaillees,
               CASE
                 WHEN COALESCE(m.worked_hours, 0) > COALESCE(m.threshold_25, 1790) THEN 'majoration_50'
@@ -40,7 +40,10 @@ router.get('/', managerOnly, async (req, res) => {
        FROM employees e
        LEFT JOIN modulation_counter m ON m.employee_id = e.id
          AND m.period_start <= ${TODAY_SQL} AND m.period_end >= ${TODAY_SQL}
-       ORDER BY e.last_name`
+       -- Salaries archives (partis) : exclus, sauf ?archived=1
+       WHERE e.archived_at IS NULL OR $1::boolean
+       ORDER BY e.last_name`,
+      [req.query.archived === '1']
     );
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
