@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { managerOnly } = require('../auth');
+const { managerOnly, requirePerm } = require('../auth');
 
 // Reglages cle/valeur (table app_settings, colonne value en jsonb)
 async function upsertSetting(key, value) {
@@ -11,6 +11,9 @@ async function upsertSetting(key, value) {
     [key, JSON.stringify(value)]
   );
 }
+
+// Droit necessaire pour modifier un reglage
+const settingPerm = req => req.params.key === 'alertes_pointage' ? 'realise' : req.params.key === 'roles_droits' ? 'roles' : 'parametrage';
 
 // GET /api/settings -> { cle: valeur, ... }
 router.get('/', managerOnly, async (req, res) => {
@@ -34,7 +37,7 @@ router.get('/:key', managerOnly, async (req, res) => {
 });
 
 // PATCH /api/settings/:key  body: la valeur complete (objet JSON)
-router.patch('/:key', managerOnly, async (req, res) => {
+router.patch('/:key', managerOnly, requirePerm(settingPerm), async (req, res) => {
   try {
     await upsertSetting(req.params.key, req.body);
     res.json({ success: true });
@@ -42,7 +45,7 @@ router.patch('/:key', managerOnly, async (req, res) => {
 });
 
 // PUT /api/settings/:key  body: { value: ... }
-router.put('/:key', managerOnly, async (req, res) => {
+router.put('/:key', managerOnly, requirePerm(settingPerm), async (req, res) => {
   try {
     await upsertSetting(req.params.key, req.body.value);
     res.json({ ok: true, key: req.params.key, value: req.body.value });

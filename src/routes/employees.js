@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { pool, TODAY_SQL } = require('../db');
-const { managerOnly, isEmployeeScoped } = require('../auth');
+const { managerOnly, isEmployeeScoped, requirePerm } = require('../auth');
 const { sendAccessLink } = require('../email');
 
 // POST /api/employees/:id/access-link-email  body: { email, url }
 // Envoie par email le lien de premier acces genere dans Dossiers RH
-router.post('/:id/access-link-email', managerOnly, async (req, res) => {
+router.post('/:id/access-link-email', managerOnly, requirePerm('dossiers_rh'), async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const url = String(req.body.url || '');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Adresse email invalide' });

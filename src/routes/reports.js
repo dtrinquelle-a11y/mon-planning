@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { managerOnly } = require('../auth');
+const { managerOnly, requirePerm } = require('../auth');
 
 const ABS_LABELS = { conge_paye: 'congés payés', repos: 'repos', indisponibilite: 'indisponible', maladie: 'maladie', sans_solde: 'sans solde', autre: 'absence' };
 const TOLERANCE_MIN = 5; // retard / depart anticipe signales au-dela de 5 minutes (meme regle que la pointeuse)
@@ -70,7 +70,7 @@ function compareDay(planned, actual, decl = [], declarative = false) {
 }
 
 // GET /api/reports/realise?week=AAAA-MM-JJ (lundi) -> prevu / pointe par salarie et par jour
-router.get('/realise', managerOnly, async (req, res) => {
+router.get('/realise', managerOnly, requirePerm('realise'), async (req, res) => {
   const week = req.query.week;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week || '')) return res.status(400).json({ error: 'Parametre week (AAAA-MM-JJ) requis' });
   try {
@@ -143,7 +143,7 @@ router.get('/realise', managerOnly, async (req, res) => {
 });
 
 // GET /api/reports/today -> activite du jour : statut de chaque salarie prevu, alertes, connexions
-router.get('/today', managerOnly, async (req, res) => {
+router.get('/today', managerOnly, requirePerm('dashboard'), async (req, res) => {
   try {
     const { rows: [t] } = await pool.query(`SELECT to_char(now() AT TIME ZONE 'Europe/Paris', 'YYYY-MM-DD') AS day,
       (EXTRACT(HOUR FROM now() AT TIME ZONE 'Europe/Paris') * 60 + EXTRACT(MINUTE FROM now() AT TIME ZONE 'Europe/Paris'))::int AS minute`);

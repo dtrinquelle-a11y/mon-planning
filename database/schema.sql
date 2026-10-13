@@ -1,4 +1,4 @@
--- Structure Planning HPA, generee le 12/10/2026 14:23
+-- Structure Planning HPA, generee le 13/10/2026 20:30
 -- A executer sur un projet Supabase NEUF (SQL Editor), avant la restauration des donnees.
 -- Apres execution : definir le mot de passe du role planning_app (ALTER ROLE planning_app PASSWORD ...)
 -- et mettre a jour DATABASE_URL du backend.
@@ -131,7 +131,12 @@ CREATE TABLE IF NOT EXISTS public.employees (
   periode_essai text,
   taches text,
   logement boolean NOT NULL DEFAULT false,
-  logement_details text
+  logement_details text,
+  civilite text,
+  contrat_genere_at timestamp with time zone,
+  contrat_signe_at timestamp with time zone,
+  contrat_signe_debut date,
+  contrat_signe_doc uuid
 );
 
 CREATE TABLE IF NOT EXISTS public.mandatory_doc_signatures (
@@ -406,6 +411,7 @@ ALTER TABLE public.absence_requests ADD CONSTRAINT absence_requests_type_check C
 ALTER TABLE public.availabilities ADD CONSTRAINT availabilities_status_check CHECK ((status = ANY (ARRAY['dispo'::text, 'matin'::text, 'apres_midi'::text, 'indispo'::text])));
 ALTER TABLE public.data_backups ADD CONSTRAINT data_backups_kind_check CHECK ((kind = ANY (ARRAY['auto'::text, 'manuel'::text])));
 ALTER TABLE public.documents ADD CONSTRAINT documents_type_check CHECK ((type = ANY (ARRAY['bulletin_paie'::text, 'contrat'::text, 'avenant'::text, 'attestation'::text, 'certificat'::text, 'autre'::text])));
+ALTER TABLE public.employees ADD CONSTRAINT employees_civilite_check CHECK (((civilite IS NULL) OR (civilite = ANY (ARRAY['Madame'::text, 'Monsieur'::text]))));
 ALTER TABLE public.employees ADD CONSTRAINT employees_coefficient_check CHECK (((coefficient IS NULL) OR ((coefficient >= 100) AND (coefficient <= 700))));
 ALTER TABLE public.employees ADD CONSTRAINT employees_salaire_horaire_check CHECK (((salaire_horaire IS NULL) OR (salaire_horaire > (0)::numeric)));
 ALTER TABLE public.employees ADD CONSTRAINT employees_service_check CHECK ((service = ANY (ARRAY['Accueil'::text, 'Housekeeping'::text, 'Technique'::text, 'Restauration'::text, 'Animation'::text, 'Managers'::text, 'Non defini'::text])));
@@ -429,6 +435,7 @@ ALTER TABLE public.access_links ADD CONSTRAINT access_links_employee_id_fkey FOR
 ALTER TABLE public.availabilities ADD CONSTRAINT availabilities_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
 ALTER TABLE public.documents ADD CONSTRAINT documents_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
 ALTER TABLE public.documents ADD CONSTRAINT documents_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES auth.users(id);
+ALTER TABLE public.employees ADD CONSTRAINT employees_contrat_signe_doc_fkey FOREIGN KEY (contrat_signe_doc) REFERENCES documents(id) ON DELETE SET NULL;
 ALTER TABLE public.mandatory_doc_signatures ADD CONSTRAINT mandatory_doc_signatures_doc_id_fkey FOREIGN KEY (doc_id) REFERENCES mandatory_docs(id) ON DELETE CASCADE;
 ALTER TABLE public.mandatory_doc_signatures ADD CONSTRAINT mandatory_doc_signatures_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
 ALTER TABLE public.modulation_counter ADD CONSTRAINT modulation_counter_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
@@ -631,7 +638,7 @@ DECLARE
     'pointage_sites','timeclock_alerts','changelog','dev_notes','mandatory_docs','mandatory_doc_signatures','work_declarations','work_declaration_history','contract_templates'];
   v_t text; v_rows json; v_data jsonb := '{}'::jsonb; v_counts jsonb := '{}'::jsonb; v_slot text; v_size integer;
 BEGIN
-  IF NOT (session_user = 'planning_app' OR public.is_manager()) THEN RAISE EXCEPTION 'Reserve aux managers'; END IF;
+  IF NOT (session_user = 'planning_app' OR (public.is_manager() AND public.has_perm('sauvegardes'))) THEN RAISE EXCEPTION 'Reserve aux managers'; END IF;
   IF p_kind NOT IN ('auto','manuel') THEN RAISE EXCEPTION 'Type de sauvegarde invalide'; END IF;
   FOREACH v_t IN ARRAY v_tables LOOP
     IF to_regclass('public.' || v_t) IS NOT NULL THEN
@@ -861,6 +868,44 @@ END;
 $function$
 ;
 
+CREATE OR REPLACE FUNCTION public.has_perm(p_perm text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT public.has_perm_user(auth.uid(), p_perm);
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.has_perm_user(p_user uuid, p_perm text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT COALESCE((
+    SELECT CASE p.role
+      WHEN 'admin' THEN true
+      WHEN 'manager' THEN p_perm <> 'roles' AND COALESCE((s.value -> 'manager' ->> p_perm)::boolean, true)
+      WHEN 'salarie' THEN p_perm = ANY (ARRAY['pointeuse','absences_demande','mes_documents','documents_communs','mes_heures','mes_horaires'])
+                          AND COALESCE((s.value -> 'salarie' ->> p_perm)::boolean, true)
+      ELSE false END
+    FROM public.user_profiles p LEFT JOIN public.app_settings s ON s.key = 'roles_droits'
+    WHERE p.id = p_user), false);
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin');
+$function$
+;
+
 CREATE OR REPLACE FUNCTION public.is_manager()
  RETURNS boolean
  LANGUAGE sql
@@ -887,6 +932,21 @@ BEGIN
     NEW.revisions := OLD.revisions;
   END IF;
   RETURN NEW;
+END $function$
+;
+
+CREATE OR REPLACE FUNCTION public.list_accounts()
+ RETURNS TABLE(user_id uuid, email text, role text, employee_id uuid, first_name text, last_name text, last_seen timestamp with time zone)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF NOT public.is_admin() THEN RAISE EXCEPTION 'Reserve aux administrateurs'; END IF;
+  RETURN QUERY
+    SELECT p.id, u.email::text, p.role, p.employee_id, e.first_name, e.last_name, GREATEST(u.last_sign_in_at, p.last_seen_at)
+      FROM public.user_profiles p JOIN auth.users u ON u.id = p.id LEFT JOIN public.employees e ON e.id = p.employee_id
+     ORDER BY CASE p.role WHEN 'admin' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, e.last_name NULLS LAST, u.email;
 END $function$
 ;
 
@@ -1050,6 +1110,8 @@ BEGIN
     NEW.emploi_repere := OLD.emploi_repere; NEW.categorie := OLD.categorie; NEW.coefficient := OLD.coefficient;
     NEW.salaire_horaire := OLD.salaire_horaire; NEW.periode_essai := OLD.periode_essai; NEW.taches := OLD.taches;
     NEW.logement := OLD.logement; NEW.logement_details := OLD.logement_details;
+    NEW.contrat_genere_at := OLD.contrat_genere_at; NEW.contrat_signe_at := OLD.contrat_signe_at;
+    NEW.contrat_signe_debut := OLD.contrat_signe_debut; NEW.contrat_signe_doc := OLD.contrat_signe_doc;
   END IF;
   RETURN NEW;
 END;
@@ -1065,10 +1127,39 @@ BEGIN
   IF current_user = 'authenticated' AND NOT public.is_manager() THEN
     NEW.emploi_repere := NULL; NEW.categorie := NULL; NEW.coefficient := NULL; NEW.salaire_horaire := NULL;
     NEW.periode_essai := NULL; NEW.taches := NULL; NEW.logement := false; NEW.logement_details := NULL;
+    NEW.contrat_genere_at := NULL; NEW.contrat_signe_at := NULL; NEW.contrat_signe_debut := NULL; NEW.contrat_signe_doc := NULL;
   END IF;
   RETURN NEW;
 END;
 $function$
+;
+
+CREATE OR REPLACE FUNCTION public.protect_roles_setting()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF (CASE WHEN TG_OP = 'DELETE' THEN OLD.key ELSE NEW.key END) = 'roles_droits' AND auth.uid() IS NOT NULL AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Seul un administrateur modifie les roles et droits';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END $function$
+;
+
+CREATE OR REPLACE FUNCTION public.protect_user_role()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF NEW.role IS DISTINCT FROM OLD.role AND auth.uid() IS NOT NULL AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Seul un administrateur peut changer les roles';
+  END IF;
+  RETURN NEW;
+END $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text DEFAULT NULL::text)
@@ -1083,6 +1174,23 @@ BEGIN
   INSERT INTO public.push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
   VALUES (auth.uid(), p_endpoint, p_p256dh, p_auth, left(p_user_agent, 300))
   ON CONFLICT (endpoint) DO UPDATE SET user_id = auth.uid(), p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, user_agent = EXCLUDED.user_agent, created_at = now();
+END $function$
+;
+
+CREATE OR REPLACE FUNCTION public.set_user_role(p_user uuid, p_role text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF NOT public.is_admin() THEN RAISE EXCEPTION 'Reserve aux administrateurs'; END IF;
+  IF p_role NOT IN ('admin', 'manager', 'salarie') THEN RAISE EXCEPTION 'Role invalide'; END IF;
+  IF p_role <> 'admin' AND (SELECT role FROM public.user_profiles WHERE id = p_user) = 'admin'
+     AND (SELECT count(*) FROM public.user_profiles WHERE role = 'admin') <= 1 THEN
+    RAISE EXCEPTION 'Il doit rester au moins un administrateur';
+  END IF;
+  UPDATE public.user_profiles SET role = p_role WHERE id = p_user;
 END $function$
 ;
 
@@ -1189,6 +1297,8 @@ CREATE TRIGGER keep_declaration_history BEFORE UPDATE ON public.work_declaration
 CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION create_user_profile();
 CREATE TRIGGER protect_employee_fields BEFORE UPDATE ON public.employees FOR EACH ROW EXECUTE FUNCTION protect_employee_fields();
 CREATE TRIGGER protect_employee_insert BEFORE INSERT ON public.employees FOR EACH ROW EXECUTE FUNCTION protect_employee_insert();
+CREATE TRIGGER protect_roles_setting BEFORE INSERT OR DELETE OR UPDATE ON public.app_settings FOR EACH ROW EXECUTE FUNCTION protect_roles_setting();
+CREATE TRIGGER protect_user_role BEFORE UPDATE ON public.user_profiles FOR EACH ROW EXECUTE FUNCTION protect_user_role();
 CREATE TRIGGER stamp_doc_signature BEFORE INSERT ON public.mandatory_doc_signatures FOR EACH ROW EXECUTE FUNCTION stamp_doc_signature();
 CREATE TRIGGER sync_declaration_timeclock AFTER INSERT OR DELETE OR UPDATE ON public.work_declarations FOR EACH ROW EXECUTE FUNCTION sync_declaration_timeclock();
 
@@ -1231,9 +1341,9 @@ INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('modeles
 
 -- ===== Regles d'acces =====
 CREATE POLICY "Acces lecture absences" ON public.absence_requests AS PERMISSIVE FOR SELECT TO planning_app USING (true);
-CREATE POLICY "Manager" ON public.absence_requests AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
+CREATE POLICY "Manager" ON public.absence_requests AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK ((is_manager() AND (has_perm('absences'::text) OR has_perm('parametrage'::text))));
 CREATE POLICY "Salarie annule sa demande" ON public.absence_requests AS PERMISSIVE FOR UPDATE TO authenticated USING (((employee_id = my_employee_id()) AND (status = 'en_attente'::text))) WITH CHECK (((employee_id = my_employee_id()) AND (status = 'annulee'::text)));
-CREATE POLICY "Salarie demande une absence" ON public.absence_requests AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((employee_id = my_employee_id()) AND (status = 'en_attente'::text) AND (decided_by IS NULL) AND (manager_comment IS NULL) AND (original_start_date IS NULL) AND (original_end_date IS NULL) AND (closure_id IS NULL)));
+CREATE POLICY "Salarie demande une absence" ON public.absence_requests AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((employee_id = my_employee_id()) AND (status = 'en_attente'::text) AND (decided_by IS NULL) AND (manager_comment IS NULL) AND (original_start_date IS NULL) AND (original_end_date IS NULL) AND (closure_id IS NULL) AND has_perm('absences_demande'::text)));
 CREATE POLICY "Salarie voit ses absences" ON public.absence_requests AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
 CREATE POLICY "Manager" ON public.access_links AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Acces settings" ON public.app_settings AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
@@ -1246,8 +1356,8 @@ CREATE POLICY "Salarie voit ses disponibilites" ON public.availabilities AS PERM
 CREATE POLICY "Acces changelog" ON public.changelog AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Lecture connectes" ON public.changelog AS PERMISSIVE FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Manager" ON public.changelog AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
-CREATE POLICY "Manager" ON public.contract_templates AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
-CREATE POLICY "Manager lecture" ON public.data_backups AS PERMISSIVE FOR SELECT TO authenticated USING (is_manager());
+CREATE POLICY "Manager" ON public.contract_templates AS PERMISSIVE FOR ALL TO authenticated USING ((is_manager() AND has_perm('contrats'::text))) WITH CHECK ((is_manager() AND has_perm('contrats'::text)));
+CREATE POLICY "Manager lecture" ON public.data_backups AS PERMISSIVE FOR SELECT TO authenticated USING ((is_manager() AND has_perm('sauvegardes'::text)));
 CREATE POLICY "Acces dev notes" ON public.dev_notes AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Lecture connectes" ON public.dev_notes AS PERMISSIVE FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Manager" ON public.dev_notes AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
@@ -1289,11 +1399,11 @@ CREATE POLICY "Manager" ON public.onboarding_fields AS PERMISSIVE FOR ALL TO aut
 CREATE POLICY "Lecture publique invitations" ON public.onboarding_invitations AS PERMISSIVE FOR SELECT TO planning_app USING (true);
 CREATE POLICY "Manager" ON public.onboarding_invitations AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
 CREATE POLICY "Acces onboarding responses" ON public.onboarding_responses AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
-CREATE POLICY "Manager" ON public.onboarding_responses AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
+CREATE POLICY "Manager" ON public.onboarding_responses AS PERMISSIVE FOR ALL TO authenticated USING ((is_manager() AND (has_perm('dossiers_rh'::text) OR has_perm('contrats'::text)))) WITH CHECK ((is_manager() AND (has_perm('dossiers_rh'::text) OR has_perm('contrats'::text))));
 CREATE POLICY "Salarie ajoute ses reponses" ON public.onboarding_responses AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK ((employee_id = my_employee_id()));
 CREATE POLICY "Salarie gere ses reponses" ON public.onboarding_responses AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
 CREATE POLICY "Salarie modifie ses reponses" ON public.onboarding_responses AS PERMISSIVE FOR UPDATE TO authenticated USING ((employee_id = my_employee_id())) WITH CHECK ((employee_id = my_employee_id()));
-CREATE POLICY "Manager" ON public.payroll_months AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
+CREATE POLICY "Manager" ON public.payroll_months AS PERMISSIVE FOR ALL TO authenticated USING ((is_manager() AND has_perm('paie'::text))) WITH CHECK ((is_manager() AND has_perm('paie'::text)));
 CREATE POLICY "Salarie voit ses heures modulees" ON public.payroll_months AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
 CREATE POLICY "Acces libre planning_preferences" ON public.planning_preferences AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Manager" ON public.planning_preferences AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
@@ -1381,8 +1491,12 @@ REVOKE ALL ON FUNCTION public.delete_push_subscription(p_endpoint text) FROM PUB
 REVOKE ALL ON FUNCTION public.docs_access_candidates() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.employees_last_sign_in() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.export_schema_sql() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.has_perm(p_perm text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.has_perm_user(p_user uuid, p_perm text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.is_admin() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.is_manager() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.keep_declaration_history() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.list_accounts() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mark_timeclock_alert(p_schedule_id uuid, p_kind text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.my_documents_accessible() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.my_employee_id() FROM PUBLIC, anon, authenticated;
@@ -1390,7 +1504,10 @@ REVOKE ALL ON FUNCTION public.pending_timeclock_alerts(p_delay integer) FROM PUB
 REVOKE ALL ON FUNCTION public.process_timeclock_scan(p_employee_id uuid, p_action text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.protect_employee_fields() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.protect_employee_insert() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.protect_roles_setting() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.protect_user_role() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.set_user_role(p_user uuid, p_role text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.stamp_doc_signature() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.sync_declaration_timeclock() FROM PUBLIC, anon, authenticated;
@@ -1438,9 +1555,17 @@ GRANT EXECUTE ON FUNCTION public.employees_last_sign_in() TO service_role;
 GRANT EXECUTE ON FUNCTION public.export_schema_sql() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.export_schema_sql() TO planning_app;
 GRANT EXECUTE ON FUNCTION public.export_schema_sql() TO service_role;
+GRANT EXECUTE ON FUNCTION public.has_perm(p_perm text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.has_perm(p_perm text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.has_perm_user(p_user uuid, p_perm text) TO planning_app;
+GRANT EXECUTE ON FUNCTION public.has_perm_user(p_user uuid, p_perm text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO service_role;
 GRANT EXECUTE ON FUNCTION public.is_manager() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_manager() TO service_role;
 GRANT EXECUTE ON FUNCTION public.keep_declaration_history() TO service_role;
+GRANT EXECUTE ON FUNCTION public.list_accounts() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.list_accounts() TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_timeclock_alert(p_schedule_id uuid, p_kind text) TO planning_app;
 GRANT EXECUTE ON FUNCTION public.mark_timeclock_alert(p_schedule_id uuid, p_kind text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.my_documents_accessible() TO authenticated;
@@ -1459,8 +1584,12 @@ GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO anon;
 GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.protect_employee_fields() TO service_role;
 GRANT EXECUTE ON FUNCTION public.protect_employee_insert() TO service_role;
+GRANT EXECUTE ON FUNCTION public.protect_roles_setting() TO service_role;
+GRANT EXECUTE ON FUNCTION public.protect_user_role() TO service_role;
 GRANT EXECUTE ON FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.set_user_role(p_user uuid, p_role text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.set_user_role(p_user uuid, p_role text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) TO PUBLIC;
 GRANT EXECUTE ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) TO anon;
 GRANT EXECUTE ON FUNCTION public.shift_bounds(p_date date, p_start time without time zone, p_end time without time zone, OUT starts_at timestamp with time zone, OUT ends_at timestamp with time zone) TO authenticated;

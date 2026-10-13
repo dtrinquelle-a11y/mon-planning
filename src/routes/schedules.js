@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool, TZ } = require('../db');
 const { sendPlanningPublished, sendShiftModified } = require('../email');
-const { managerOnly, isEmployeeScoped } = require('../auth');
+const { managerOnly, isEmployeeScoped, requirePerm } = require('../auth');
 const { notifyEmployees } = require('../push');
 
 // Erreur base de donnees -> message lisible (doublon : meme salarie, meme jour, meme heure de debut)
@@ -97,7 +97,7 @@ router.get('/monthly-summary', managerOnly, async (req, res) => {
 });
 
 // POST /api/schedules
-router.post('/', managerOnly, async (req, res) => {
+router.post('/', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   const { employee_id, work_date, start_time, end_time, shift_type, break_minutes, note } = req.body;
   if (!employee_id || !work_date || !start_time || !end_time || !shift_type)
     return res.status(400).json({ error: 'Champs requis manquants' });
@@ -112,7 +112,7 @@ router.post('/', managerOnly, async (req, res) => {
 
 // POST /api/schedules/bulk  body: { shifts: [{ employee_id, work_date, start_time, end_time, shift_type, break_minutes, note }] }
 // Creation en lot (application d'un modele de semaine) ; un creneau deja existant (meme salarie, jour, heure) est ignore
-router.post('/bulk', managerOnly, async (req, res) => {
+router.post('/bulk', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   const shifts = Array.isArray(req.body.shifts) ? req.body.shifts : [];
   if (!shifts.length) return res.json({ created: 0, skipped: 0 });
   if (shifts.length > 500) return res.status(400).json({ error: 'Trop de creneaux en une fois (max 500)' });
@@ -131,7 +131,7 @@ router.post('/bulk', managerOnly, async (req, res) => {
 
 // POST /api/schedules/clear  body: { week: 'AAAA-MM-JJ' (lundi), employee_ids: [...] }
 // Vide la semaine pour ces salaries (option "remplacer" lors de l'application d'un modele)
-router.post('/clear', managerOnly, async (req, res) => {
+router.post('/clear', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   const { week, employee_ids } = req.body;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week || '') || !Array.isArray(employee_ids) || !employee_ids.length)
     return res.status(400).json({ error: 'Parametres week et employee_ids requis' });
@@ -145,7 +145,7 @@ router.post('/clear', managerOnly, async (req, res) => {
 });
 
 // PATCH /api/schedules/:id
-router.patch('/:id', managerOnly, async (req, res) => {
+router.patch('/:id', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   const allowed = ['start_time', 'end_time', 'shift_type', 'break_minutes', 'note', 'work_date', 'employee_id'];
   const updates = Object.keys(req.body).filter(k => allowed.includes(k));
   if (!updates.length) return res.status(400).json({ error: 'Aucun champ valide' });
@@ -183,7 +183,7 @@ router.patch('/:id', managerOnly, async (req, res) => {
 });
 
 // POST /api/schedules/publish
-router.post('/publish', managerOnly, async (req, res) => {
+router.post('/publish', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   const { week } = req.body;
   if (!week) return res.status(400).json({ error: 'Parametre week requis' });
   try {
@@ -214,7 +214,7 @@ router.post('/publish', managerOnly, async (req, res) => {
 });
 
 // DELETE /api/schedules/:id
-router.delete('/:id', managerOnly, async (req, res) => {
+router.delete('/:id', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM schedules WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Creneau introuvable' });

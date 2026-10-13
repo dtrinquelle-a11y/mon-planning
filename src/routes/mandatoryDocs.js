@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { managerOnly } = require('../auth');
+const { managerOnly, requirePerm } = require('../auth');
 const { sendDocsToSign } = require('../email');
 const { notifyEmployees } = require('../push');
 
 // POST /api/mandatory-docs/remind  body: { doc_id? }
 // Email aux salaries actifs qui n'ont pas (ou plus) de signature valide : un document precis, ou tous si doc_id absent.
 // Signature valide = version actuelle du document, et de moins d'un an pour les documents annuels.
-router.post('/remind', managerOnly, async (req, res) => {
+router.post('/remind', managerOnly, requirePerm('documents'), async (req, res) => {
   const docId = req.body.doc_id || null;
   try {
     const { rows } = await pool.query(

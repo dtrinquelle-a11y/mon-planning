@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { sendAbsenceRequested, sendAbsenceDecided, sendAbsenceChanged, sendClosureLeave } = require('../email');
-const { managerOnly } = require('../auth');
+const { managerOnly, requirePerm, userHasPerm } = require('../auth');
 const { notifyEmployees, notifyManagers } = require('../push');
 
 const TYPE_LABELS = {
@@ -40,6 +40,7 @@ router.post('/notify', async (req, res) => {
 
     // Evenements suivants : reserves aux managers
     if (req.user && !req.user.isManager) return res.status(403).json({ error: 'Reserve aux managers' });
+    if (!(await userHasPerm(req.user, 'absences'))) return res.status(403).json({ error: 'Droit insuffisant pour traiter les absences' });
     // Notification sur le telephone du salarie (meme sans email)
     const pushTitle = event === 'cancelled' ? 'Absence annulée' : event === 'modified' ? 'Absence modifiée'
       : a.status === 'acceptee' ? 'Absence acceptée' : a.status === 'refusee' ? 'Absence refusée' : null;
@@ -62,7 +63,7 @@ router.post('/notify', async (req, res) => {
 
 // POST /api/absences/closure-notify  body: { closure_id }
 // Previent chaque salarie des conges poses pour une fermeture de l'entreprise (Parametrage > Conges payes)
-router.post('/closure-notify', managerOnly, async (req, res) => {
+router.post('/closure-notify', managerOnly, requirePerm('parametrage'), async (req, res) => {
   const id = req.body.closure_id;
   if (!/^[0-9a-f-]{36}$/i.test(id || '')) return res.status(400).json({ error: 'closure_id requis' });
   try {

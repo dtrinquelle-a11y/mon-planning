@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { managerOnly } = require('../auth');
+const { managerOnly, requirePerm } = require('../auth');
 
 // ---------- Utilitaires de dates (chaines AAAA-MM-JJ, calculs en UTC pour eviter les decalages) ----------
 const D = iso => new Date(iso + 'T00:00:00Z');
@@ -41,7 +41,7 @@ function shiftMinutes(s) {
 const h2 = min => Math.round(min / 60 * 100) / 100;
 
 // GET /api/exports/paie?month=AAAA-MM  -> elements variables de paie par salarie
-router.get('/paie', managerOnly, async (req, res) => {
+router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
   const month = req.query.month;
   if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ error: 'Parametre month (AAAA-MM) requis' });
   const first = D(month + '-01');

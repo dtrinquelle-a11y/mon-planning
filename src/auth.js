@@ -57,4 +57,23 @@ function managerOnly(req, res, next) {
 // Salarie identifie (non manager) : ses acces sont limites a ses propres donnees
 const isEmployeeScoped = req => !!req.user && !req.user.isManager;
 
-module.exports = { requireAuth, managerOnly, isEmployeeScoped };
+// Droit d'un compte (Parametrage > Roles et droits), calcule par la base
+async function userHasPerm(user, perm) {
+  if (!enforce()) return true;
+  if (!user) return false;
+  const { rows } = await pool.query('SELECT public.has_perm_user($1, $2) AS ok', [user.id, perm]);
+  return !!rows[0].ok;
+}
+
+// Reserve une route a un droit ; perm peut etre une fonction (req) -> nom du droit
+function requirePerm(perm) {
+  return async (req, res, next) => {
+    const name = typeof perm === 'function' ? perm(req) : perm;
+    try {
+      if (await userHasPerm(req.user, name)) return next();
+      res.status(403).json({ error: 'Droit insuffisant pour cette action (' + name + ')' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  };
+}
+
+module.exports = { requireAuth, managerOnly, isEmployeeScoped, requirePerm, userHasPerm };

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool, TZ, TODAY_SQL } = require('../db');
 const { sendGeoAlert } = require('../email');
-const { managerOnly, isEmployeeScoped } = require('../auth');
+const { managerOnly, isEmployeeScoped, userHasPerm } = require('../auth');
 
 // POST /api/timeclock/scan
 router.post('/scan', async (req, res) => {
@@ -11,6 +11,7 @@ router.post('/scan', async (req, res) => {
   if (!['in','out'].includes(action)) return res.status(400).json({ error: 'action doit etre in ou out' });
   // Un salarie ne peut pointer que pour lui-meme
   if (isEmployeeScoped(req) && employee_id !== req.user.employeeId) return res.status(403).json({ error: 'Vous ne pouvez pointer que pour vous-meme' });
+  if (isEmployeeScoped(req) && !(await userHasPerm(req.user, 'pointeuse'))) return res.status(403).json({ error: 'La pointeuse ne vous est pas ouverte' });
 
   try {
     // Pointeuse desactivee (Parametrage > Pointeuse) : les salaries valident leurs horaires dans leur espace
