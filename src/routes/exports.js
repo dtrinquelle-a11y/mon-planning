@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { managerOnly, requirePerm } = require('../auth');
+const { managerOnly, requirePerm, userHasPerm } = require('../auth');
 
 // ---------- Utilitaires de dates (chaines AAAA-MM-JJ, calculs en UTC pour eviter les decalages) ----------
 const D = iso => new Date(iso + 'T00:00:00Z');
@@ -178,6 +178,83 @@ router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
       });
     }
     res.json({ month, du: iso(first), au: iso(last), rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/exports/services?from=AAAA-MM-JJ(lundi)&weeks=8
+// Tableau de bord : par service et par semaine, heures travaillees, heures au-dela du contrat et cout brut,
+// avec les memes semaines un an plus tot (52 semaines avant, memes jours de la semaine).
+// Heures : creneaux du planning, corriges par les horaires declares (modifies / non travailles).
+// Cout : heures x taux horaire brut (fiche, sinon minimum conventionnel du coefficient, sinon coefficient 100),
+// hors majorations et charges patronales. Visible seulement avec le droit Paie.
+router.get('/services', managerOnly, requirePerm('dashboard'), async (req, res) => {
+  const weeks = Math.min(26, Math.max(1, parseInt(req.query.weeks, 10) || 8));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '')) return res.status(400).json({ error: 'Parametre from (AAAA-MM-JJ) requis' });
+  const f = D(req.query.from);
+  const from = addDays(f, -((f.getUTCDay() + 6) % 7));
+  try {
+    const showCost = await userHasPerm(req.user, 'paie');
+    const [{ rows: emps }, { rows: cfgRows }] = await Promise.all([
+      pool.query('SELECT id, service, contract_hours, salaire_horaire, coefficient FROM employees'),
+      pool.query("SELECT value FROM app_settings WHERE key = 'cc_hpa'"),
+    ]);
+    const cc = (cfgRows[0] || {}).value || {};
+    const base = parseFloat(cc.salaire_base) || 1858.92, point = parseFloat(cc.valeur_point) || 5.63;
+    const empBy = Object.fromEntries(emps.map(e => {
+      const rate = e.salaire_horaire ? parseFloat(e.salaire_horaire)
+        : (base + (Math.max(100, e.coefficient || 100) - 100) * point) / 151.67;
+      return [e.id, { ...e, rate, estimated: !e.salaire_horaire, contract: parseFloat(e.contract_hours) || 35 }];
+    }));
+
+    async function range(start) {
+      const end = addDays(start, weeks * 7 - 1);
+      const { rows } = await pool.query(`
+        SELECT s.employee_id, s.work_date, s.service,
+               COALESCE(CASE WHEN d.status = 'modifie' THEN d.start_time END, s.start_time) AS start_time,
+               COALESCE(CASE WHEN d.status = 'modifie' THEN d.end_time END, s.end_time) AS end_time,
+               COALESCE(CASE WHEN d.status = 'modifie' THEN d.break_minutes END, s.break_minutes) AS break_minutes
+        FROM schedules s LEFT JOIN work_declarations d ON d.schedule_id = s.id
+        WHERE s.work_date BETWEEN $1 AND $2 AND s.shift_type NOT IN ('repos', 'off', 'recup')
+          AND s.start_time IS NOT NULL AND s.end_time IS NOT NULL
+          AND (d.status IS NULL OR d.status <> 'non_travaille')`, [iso(start), iso(end)]);
+      // minutes par salarie et par semaine, reparties par service
+      const per = {};
+      for (const r of rows) {
+        const e = empBy[r.employee_id]; if (!e) continue;
+        const dd = D(dateStr(r.work_date));
+        const w = Math.floor((dd - start) / (7 * 86400000));
+        const svc = r.service || e.service || 'Sans service';
+        const k = r.employee_id + '|' + w;
+        per[k] = per[k] || { e, w, total: 0, svc: {} };
+        const m = shiftMinutes(r).net;
+        per[k].total += m; per[k].svc[svc] = (per[k].svc[svc] || 0) + m;
+      }
+      const out = {}; // service -> [semaine] -> { heures, sup, cout }
+      let estimated = 0; const seenEst = new Set();
+      for (const p of Object.values(per)) {
+        const sup = Math.max(0, p.total - p.e.contract * 60);
+        if (p.e.estimated && !seenEst.has(p.e.id)) { seenEst.add(p.e.id); estimated++; }
+        for (const [svc, m] of Object.entries(p.svc)) {
+          const share = p.total ? m / p.total : 0;
+          out[svc] = out[svc] || Array.from({ length: weeks }, () => ({ heures: 0, sup: 0, cout: 0 }));
+          const c = out[svc][p.w];
+          c.heures += m / 60; c.sup += sup * share / 60; c.cout += (m / 60) * p.e.rate;
+        }
+      }
+      for (const arr of Object.values(out)) arr.forEach(c => {
+        c.heures = Math.round(c.heures * 100) / 100; c.sup = Math.round(c.sup * 100) / 100;
+        c.cout = showCost ? Math.round(c.cout) : null;
+      });
+      return { data: out, estimated };
+    }
+
+    const [cur, prev] = await Promise.all([range(from), range(addDays(from, -364))]);
+    res.json({
+      weeks: Array.from({ length: weeks }, (_, i) => iso(addDays(from, i * 7))),
+      weeks_n1: Array.from({ length: weeks }, (_, i) => iso(addDays(from, i * 7 - 364))),
+      services: [...new Set([...Object.keys(cur.data), ...Object.keys(prev.data)])].sort(),
+      current: cur.data, previous: prev.data, cost_visible: showCost, estimated_rates: cur.estimated,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

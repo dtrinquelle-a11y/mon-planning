@@ -108,6 +108,48 @@ Sans cette clé, ces deux informations restent illisibles (tout le reste fonctio
 
 ---
 
+## En cas de fuite de données (ou de doute)
+
+### Ce qui est exposé selon ce qui a fuité
+
+| Ce qui a fuité | Ce que la personne peut lire | Données sensibles (n° SS, IBAN) |
+|---|---|---|
+| Un fichier de sauvegarde (Drive, PC perdu…) | Fiches salariés, plannings, absences, pointages | **Protégées** : chiffrées, la clé n'est pas dans la sauvegarde |
+| La clé de secours seule | Rien | Rien sans la base |
+| Le compte d'un salarié | Ses propres données uniquement | Les siennes, masquées |
+| Le compte d'un manager | Ce que ses droits permettent | Masquées ; chaque affichage est journalisé |
+| Le compte admin, le mot de passe `planning_app` ou le compte Supabase | Tout | **Exposées** (la clé est dans la base) |
+
+Les fichiers déposés (pièces d'identité, bulletins) sont dans le stockage Supabase : ils ne sont pas dans les sauvegardes, et seuls les comptes concernés peuvent les ouvrir.
+
+### Dans l'heure : couper l'accès
+
+1. **Compte de l'application compromis** : Supabase › Authentication › Users › l'utilisateur › « Send password recovery » (ou supprimer le compte). Pour un manager, repasser son rôle en salarié (Paramétrage › Rôles et droits).
+2. **Mot de passe `planning_app`** (fichier `.env`, capture d'écran…) : dans le SQL Editor, `ALTER ROLE planning_app PASSWORD 'un-nouveau-mot-de-passe-long';`, puis mettre à jour `DATABASE_URL` du backend dans Railway (il redémarre tout seul).
+3. **Compte Supabase, Railway, GitHub, Google ou Resend** : changer le mot de passe, déconnecter les autres sessions, activer la double authentification si ce n'est pas fait. Pour Resend : révoquer la clé API et en créer une nouvelle (variable `RESEND_API_KEY` dans Railway).
+4. **Clé de chiffrement + accès à la base** : demander une rotation de clé (les données sont déchiffrées avec l'ancienne clé, chiffrées avec une nouvelle, puis on télécharge la nouvelle clé de secours).
+
+### Comprendre ce qui s'est passé
+
+- Paramétrage › Rôles et droits › **Journal des consultations** : qui a affiché un n° SS ou un IBAN, et quand.
+- Paramétrage › Rôles et droits › liste des comptes : dernière connexion de chaque compte, comptes inconnus.
+- Supabase › Logs (Auth) : connexions, adresses IP.
+
+### Sous 72 heures : obligations RGPD
+
+- **Noter l'incident** (date, données concernées, nombre de salariés, mesures prises) dans un registre des violations, même si rien n'est à déclarer : c'est obligatoire (art. 33.5 du RGPD).
+- **Notifier la CNIL sous 72 h** si la fuite présente un risque pour les salariés (par exemple des fiches avec adresses, ou des données sensibles déchiffrables) : téléservice de notification des violations sur cnil.fr.
+- **Prévenir les salariés concernés** si le risque est élevé (n° SS ou IBAN en clair, pièces d'identité) : leur dire quoi surveiller (prélèvements inconnus, tentatives d'usurpation d'identité). Si seules les données chiffrées ont fui, cette information n'est en principe pas obligatoire.
+
+### Prévention (déjà en place ou à garder)
+
+- Données sensibles chiffrées, masquées, consultations journalisées ; IBAN effacé 6 mois après le départ.
+- Sauvegardes sans la clé de chiffrement ; clé de secours rangée **séparément** (gestionnaire de mots de passe).
+- Double authentification sur Supabase, Railway, GitHub, Google et Resend.
+- Droits au plus juste dans Rôles et droits ; retirer le rôle manager à quelqu'un qui quitte ce poste.
+
+---
+
 ## Variables d'environnement (noms seulement, les valeurs sont dans Railway et le gestionnaire de mots de passe)
 
 **Backend (`mon-planning`)**

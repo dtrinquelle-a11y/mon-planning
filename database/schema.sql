@@ -1,4 +1,4 @@
--- Structure Planning HPA, generee le 13/10/2026 21:02
+-- Structure Planning HPA, generee le 13/10/2026 21:44
 -- A executer sur un projet Supabase NEUF (SQL Editor), avant la restauration des donnees.
 -- Apres execution : definir le mot de passe du role planning_app (ALTER ROLE planning_app PASSWORD ...)
 -- et mettre a jour DATABASE_URL du backend.
@@ -149,7 +149,10 @@ CREATE TABLE IF NOT EXISTS public.employees (
   contrat_signe_doc uuid,
   logement_pieces integer NOT NULL DEFAULT 1,
   caution_recue_at timestamp with time zone,
-  nss_enc bytea
+  nss_enc bytea,
+  cp_init_date date,
+  cp_init_n1 numeric(6,2),
+  cp_init_n numeric(6,2)
 );
 
 CREATE TABLE IF NOT EXISTS public.mandatory_doc_signatures (
@@ -1259,6 +1262,7 @@ BEGIN
     NEW.contrat_genere_at := OLD.contrat_genere_at; NEW.contrat_signe_at := OLD.contrat_signe_at;
     NEW.contrat_signe_debut := OLD.contrat_signe_debut; NEW.contrat_signe_doc := OLD.contrat_signe_doc;
     NEW.logement_pieces := OLD.logement_pieces; NEW.caution_recue_at := OLD.caution_recue_at; NEW.nss_enc := OLD.nss_enc;
+    NEW.cp_init_date := OLD.cp_init_date; NEW.cp_init_n1 := OLD.cp_init_n1; NEW.cp_init_n := OLD.cp_init_n;
   END IF;
   RETURN NEW;
 END;
