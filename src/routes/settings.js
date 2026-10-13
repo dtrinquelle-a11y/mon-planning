@@ -13,7 +13,7 @@ async function upsertSetting(key, value) {
 }
 
 // Droit necessaire pour modifier un reglage
-const settingPerm = req => req.params.key === 'alertes_pointage' ? 'realise' : req.params.key === 'roles_droits' ? 'roles' : 'parametrage';
+const settingPerm = req => ({ alertes_pointage: 'realise', roles_droits: 'roles', consignes: 'planning_modifier' })[req.params.key] || 'parametrage';
 
 // GET /api/settings -> { cle: valeur, ... }
 router.get('/', managerOnly, async (req, res) => {

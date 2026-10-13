@@ -13,6 +13,9 @@ async function runNightlyBackup() {
   const { rows } = await pool.query("SELECT public.create_backup_snapshot('auto') AS r");
   const r = rows[0].r;
   console.log('[Sauvegarde] ' + r.slot + ' creee (' + Math.round(r.size_bytes / 1024) + ' Ko)');
+  // Donnees sensibles : IBAN efface 6 mois apres la fin du contrat
+  const { rows: p } = await pool.query('SELECT public.purge_departed_sensitive() AS n');
+  if (p[0].n > 0) console.log('[Donnees sensibles] ' + p[0].n + ' IBAN efface(s) (contrat termine depuis plus de 6 mois)');
 }
 
 function startBackupJob() {

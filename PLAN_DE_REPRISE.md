@@ -16,7 +16,7 @@ Que faire si un service tombe en panne en pleine saison. À garder aussi **hors 
 
 1. **Chaque lundi** : Paramétrage › Sauvegardes › « Télécharger » sur la plus récente, puis ranger le fichier dans le Drive. Il contient les données **et** la structure de la base : c'est tout ce qu'il faut pour tout reconstruire.
 2. **Avant une grosse manipulation** (import, suppression en lot) : « Sauvegarder maintenant ».
-3. Garder dans un gestionnaire de mots de passe : les accès Railway, Supabase, GitHub, Resend et Gandi, ainsi que le mot de passe du rôle `planning_app`.
+3. Garder dans un gestionnaire de mots de passe : les accès Railway, Supabase, GitHub, Resend et Gandi, le mot de passe du rôle `planning_app`, et la **clé de chiffrement des données sensibles** (Paramétrage › Rôles et droits › « Télécharger la clé de secours »). Cette clé ne doit **jamais** être rangée avec les sauvegardes : c'est elle qui protège le n° de sécurité sociale et l'IBAN si un fichier de sauvegarde fuite.
 
 > Le fichier de sauvegarde contient des données personnelles (RGPD) : Drive privé uniquement, jamais par email.
 
@@ -72,6 +72,15 @@ ALTER ROLE planning_app PASSWORD 'un-mot-de-passe-long';
 ```
 
 La nouvelle `DATABASE_URL` du backend reprend la chaîne « Session pooler » en remplaçant l'utilisateur par `planning_app.<ref-du-projet>` et en mettant ce mot de passe.
+
+**3 bis. Remettre la clé de chiffrement.** Le n° de sécurité sociale et l'IBAN sont chiffrés ; la clé n'est pas dans la sauvegarde. Reprendre la clé de secours dans le gestionnaire de mots de passe et l'exécuter dans le SQL Editor :
+
+```sql
+INSERT INTO public.server_secrets (key, value) VALUES ('cle_donnees_sensibles', 'LA-CLE-DE-SECOURS')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+
+Sans cette clé, ces deux informations restent illisibles (tout le reste fonctionne) : il faudrait les redemander aux salariés.
 
 **4. Réglages Supabase à refaire** (Authentication) :
 - **Sign In / Providers › Email** : désactiver « Confirm email ».

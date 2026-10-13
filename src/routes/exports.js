@@ -40,6 +40,23 @@ function shiftMinutes(s) {
 
 const h2 = min => Math.round(min / 60 * 100) / 100;
 
+// Avantage en nature logement : bareme forfaitaire Urssaf 2026 (modifiable dans Parametrage > Logement)
+// Tranches de remuneration brute mensuelle en fraction du plafond mensuel de la securite sociale (PMSS)
+const LOGEMENT_DEFAULTS = {
+  pmss: 4005,
+  une_piece: [79.70, 93.00, 106.20, 119.40, 146.40, 172.60, 199.40, 225.60],
+  par_piece: [42.60, 59.70, 79.70, 99.50, 126.10, 152.40, 185.70, 212.30],
+};
+const TRANCHES = [0.5, 0.6, 0.7, 0.9, 1.1, 1.3, 1.5];
+function logementForfait(cfg, salaireMensuel, pieces) {
+  const c = { ...LOGEMENT_DEFAULTS, ...(cfg || {}) };
+  const pmss = parseFloat(c.pmss) || LOGEMENT_DEFAULTS.pmss;
+  let t = 0;
+  while (t < TRANCHES.length && salaireMensuel >= TRANCHES[t] * pmss) t++;
+  const n = Math.max(1, parseInt(pieces, 10) || 1);
+  return n === 1 ? parseFloat(c.une_piece[t]) : parseFloat(c.par_piece[t]) * n;
+}
+
 // GET /api/exports/paie?month=AAAA-MM  -> elements variables de paie par salarie
 router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
   const month = req.query.month;
@@ -56,7 +73,8 @@ router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
 
   try {
     const [emps, shifts, worked, lates, modul, recupPeriod] = await Promise.all([
-      pool.query(`SELECT id, first_name, last_name, service, contract_type, contract_hours, hire_date, contract_end_date, is_active, is_temp
+      pool.query(`SELECT id, first_name, last_name, service, contract_type, contract_hours, hire_date, contract_end_date, is_active, is_temp,
+                         logement, logement_pieces, salaire_horaire, coefficient
                   FROM employees ORDER BY service, last_name, first_name`),
       pool.query(`SELECT employee_id, work_date, start_time, end_time, break_minutes, shift_type FROM schedules
                   WHERE work_date >= $1 AND work_date <= $2 AND shift_type <> 'repos'`, [iso(firstMonday), iso(lastSunday)]),
@@ -80,6 +98,12 @@ router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
       pool.query(`SELECT employee_id, start_time, end_time, break_minutes FROM schedules
                   WHERE shift_type = 'recup' AND work_date >= $1 AND work_date <= $2`, [periodStart, iso(last)]),
     ]);
+    const { rows: cfgRows } = await pool.query("SELECT key, value FROM app_settings WHERE key IN ('logement', 'cc_hpa')");
+    const cfgOf = k => (cfgRows.find(r => r.key === k) || {}).value || {};
+    const logementCfg = cfgOf('logement'), cc = cfgOf('cc_hpa');
+    const base = parseFloat(cc.salaire_base) || 1858.92, point = parseFloat(cc.valeur_point) || 5.63;
+    const daysInMonth = Math.round((next - first) / 86400000);
+
     const recupCumulBy = {};
     recupPeriod.rows.forEach(s => { recupCumulBy[s.employee_id] = (recupCumulBy[s.employee_id] || 0) + shiftMinutes(s).net; });
 
@@ -116,6 +140,24 @@ router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([monday, min]) => ({ monday, heures: h2(min), au_dela: h2(Math.max(0, min - contract * 60)) }));
 
+      // Logement fourni : forfait du mois, ou par semaine commencee si le salarie n'est loge qu'une partie du mois
+      // (une semaine = 1/4 du forfait mensuel, plafonne au forfait)
+      let logement = null;
+      if (e.logement) {
+        const from = e.hire_date && dateStr(e.hire_date) > iso(first) ? dateStr(e.hire_date) : iso(first);
+        const to = e.contract_end_date && dateStr(e.contract_end_date) < iso(last) ? dateStr(e.contract_end_date) : iso(last);
+        const days = from <= to ? Math.round((D(to) - D(from)) / 86400000) + 1 : 0;
+        if (days > 0) {
+          const hours = parseFloat(e.contract_hours) || 35;
+          const monthlyPay = e.salaire_horaire ? parseFloat(e.salaire_horaire) * hours * 52 / 12
+            : e.coefficient ? (base + (Math.max(100, e.coefficient) - 100) * point) * hours / 35 : 0;
+          const forfait = logementForfait(logementCfg, monthlyPay, e.logement_pieces);
+          const weeks = Math.ceil(days / 7);
+          const montant = days >= daysInMonth ? forfait : Math.min(forfait, weeks * forfait / 4);
+          logement = { jours: days, semaines: days >= daysInMonth ? null : weeks, forfait_mensuel: forfait, montant: Math.round(montant * 100) / 100, pieces: e.logement_pieces || 1 };
+        }
+      }
+
       rows.push({
         employee_id: e.id, nom: e.last_name || '', prenom: e.first_name || '', service: e.service,
         contrat: e.contract_type, heures_contrat: contract, temporaire: !!e.is_temp,
@@ -131,6 +173,8 @@ router.get('/paie', managerOnly, requirePerm('paie'), async (req, res) => {
         recup_cumul_periode: h2(recupCumulBy[e.id] || 0),
         retards: latesBy[e.id] || 0,
         modulation_cumul: modBy[e.id] !== undefined ? Math.round(modBy[e.id] * 100) / 100 : null,
+        avantage_logement: logement ? logement.montant : null,
+        logement,
       });
     }
     res.json({ month, du: iso(first), au: iso(last), rows });
