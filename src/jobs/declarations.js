@@ -31,6 +31,7 @@ async function sendSundayEmails(sunday) {
        JOIN employees e ON e.id = s.employee_id
        LEFT JOIN work_declarations w ON w.schedule_id = s.id
       WHERE s.work_date BETWEEN $1::date AND $2::date AND s.shift_type NOT IN ('repos', 'recup', 'off')
+        AND s.is_published
         AND e.is_active AND NOT COALESCE(e.is_temp, false)
         AND NOT EXISTS (SELECT 1 FROM absence_requests a WHERE a.employee_id = s.employee_id AND a.status = 'acceptee'
                           AND s.work_date BETWEEN a.start_date AND a.end_date)

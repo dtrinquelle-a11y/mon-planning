@@ -1,8 +1,32 @@
 const express = require('express');
 const router = express.Router();
 const { pool, TODAY_SQL } = require('../db');
-const { managerOnly, isEmployeeScoped, requirePerm } = require('../auth');
-const { sendAccessLink } = require('../email');
+const { managerOnly, isEmployeeScoped, requirePerm, userHasPerm } = require('../auth');
+const { sendAccessLink, sendCautionLink } = require('../email');
+
+// POST /api/employees/:id/caution-email -> envoie au salarie loge le lien de paiement de la caution
+// (Parametrage > Logement). Refuse si le salarie n'est pas loge, si la caution est recue ou sans lien configure.
+router.post('/:id/caution-email', managerOnly, async (req, res) => {
+  try {
+    if (!(await userHasPerm(req.user, 'dossiers_rh')) && !(await userHasPerm(req.user, 'contrats'))) {
+      return res.status(403).json({ error: 'Droit insuffisant pour cette action (dossiers_rh ou contrats)' });
+    }
+    const [{ rows }, { rows: cfg }] = await Promise.all([
+      pool.query('SELECT first_name, email, logement, caution_recue_at FROM employees WHERE id = $1', [req.params.id]),
+      pool.query("SELECT value FROM app_settings WHERE key = 'logement'"),
+    ]);
+    const e = rows[0], c = (cfg[0] || {}).value || {};
+    if (!e) return res.status(404).json({ error: 'Salarie introuvable' });
+    if (!e.logement) return res.status(400).json({ error: "Ce salarie n'est pas loge" });
+    if (e.caution_recue_at) return res.status(400).json({ error: 'La caution est deja recue' });
+    if (!/^https:\/\//.test(c.caution_lien || '')) return res.status(400).json({ error: 'Aucun lien de paiement : Parametrage > Logement' });
+    if (!e.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.email) || e.email.endsWith('@temp.fr')) return res.status(400).json({ error: "Pas d'adresse email valide sur la fiche" });
+    const sent = await sendCautionLink({ to: e.email, firstName: e.first_name, amount: String(c.caution_montant || '').replace('.', ','), url: c.caution_lien, note: c.caution_texte });
+    if (!sent) return res.status(502).json({ error: "L'email n'a pas pu etre envoye" });
+    const { rows: upd } = await pool.query('UPDATE employees SET caution_lien_envoye_at = now() WHERE id = $1 RETURNING caution_lien_envoye_at', [req.params.id]);
+    res.json({ sent: true, at: upd[0].caution_lien_envoye_at, to: e.email });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // POST /api/employees/:id/access-link-email  body: { email, url }
 // Envoie par email le lien de premier acces genere dans Dossiers RH

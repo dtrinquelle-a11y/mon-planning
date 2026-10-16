@@ -73,16 +73,20 @@ function baseTemplate(content) {
 }
 
 // Email : planning publié
-function sendPlanningPublished({ to, employeeName, weekStart, shiftsCount }) {
+// weekStart : lundi de la premiere semaine ; weeks : nombre de semaines publiees d'un coup
+function sendPlanningPublished({ to, employeeName, weekStart, shiftsCount, weeks = 1 }) {
+  const fr = iso => String(iso).slice(0, 10).split('-').reverse().join('/');
+  const end = new Date(String(weekStart).slice(0, 10) + 'T12:00:00Z'); end.setUTCDate(end.getUTCDate() + 7 * weeks - 1);
+  const periode = weeks > 1 ? 'du ' + fr(weekStart) + ' au ' + fr(end.toISOString()) : 'de la semaine du ' + fr(weekStart);
   return send('planning publie', {
     to,
-    subject: 'Votre planning a ete publie - Semaine du ' + weekStart,
+    subject: 'Votre planning a ete publie - ' + (weeks > 1 ? 'du ' + fr(weekStart) + ' au ' + fr(end.toISOString()) : 'semaine du ' + fr(weekStart)),
     html: baseTemplate(`
         <div class="content">
           <p>Bonjour ${esc(employeeName)},</p>
-          <p>Votre planning pour la semaine du <strong>${esc(weekStart)}</strong> vient d'etre publie.</p>
+          <p>Votre planning ${esc(periode)} vient d'etre publie.</p>
           <div class="highlight">
-            <strong>${esc(shiftsCount)} creneau(x)</strong> vous ont ete attribues cette semaine.
+            <strong>${esc(shiftsCount)} creneau(x)</strong> vous ont ete attribues sur cette periode.
           </div>
           <p>Connectez-vous pour consulter vos horaires :</p>
           <a href="${APP_URL}" class="btn">Voir mon planning</a>
@@ -343,6 +347,23 @@ function sendAccessLink({ to, firstName, url }) {
   });
 }
 
+// Email : lien de paiement de la caution du logement (salarie loge)
+function sendCautionLink({ to, firstName, amount, url, note }) {
+  return send('caution logement', {
+    to,
+    subject: 'Caution de votre logement' + (amount ? ' (' + amount + ' EUR)' : ''),
+    html: baseTemplate(`
+        <div class="content">
+          <p>Bonjour ${esc(firstName)},</p>
+          <p>Vous serez loge(e) pendant votre contrat. Une caution${amount ? ' de <strong>' + esc(amount) + ' EUR</strong>' : ''} est demandee pour le logement.</p>
+          ${note ? '<p>' + esc(note) + '</p>' : ''}
+          <a href="${esc(url)}" class="btn">Payer la caution</a>
+          <p style="font-size:13px;color:#6B7280">Le lien est aussi disponible dans votre espace de l'application, jusqu'a la reception de la caution.<br>Si le bouton ne fonctionne pas : ${esc(url)}</p>
+        </div>
+      `)
+  });
+}
+
 // Email : conges payes poses d'office pour une fermeture de l'entreprise
 function sendClosureLeave({ to, employeeName, label, periodLabel }) {
   return send('fermeture entreprise', {
@@ -373,6 +394,7 @@ module.exports = {
   sendDocsAccessClosed,
   sendDocumentAvailable,
   sendPlanningPublished,
+  sendCautionLink,
   sendShiftModified,
   sendGeoAlert,
   sendEchangeRequest,

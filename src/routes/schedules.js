@@ -32,6 +32,8 @@ router.get('/', async (req, res) => {
       WHERE s.work_date >= $1::date
         AND s.work_date < $1::date + INTERVAL '7 days'
         AND ($2::uuid IS NULL OR s.employee_id = $2::uuid)
+        -- un salarie ne voit que les creneaux publies (les managers voient aussi les brouillons)
+        AND ($2::uuid IS NULL OR s.is_published)
       ORDER BY s.work_date, s.start_time
     `, [week, isEmployeeScoped(req) ? req.user.employeeId : null]);
     res.json(result.rows);
@@ -182,34 +184,73 @@ router.patch('/:id', managerOnly, requirePerm('planning_modifier'), async (req, 
   } catch (err) { sendDbError(res, err); }
 });
 
-// POST /api/schedules/publish
+// GET /api/schedules/publication?from=AAAA-MM-JJ&weeks=6 -> etat de publication de chaque semaine
+router.get('/publication', managerOnly, async (req, res) => {
+  const { from } = req.query;
+  const weeks = Math.min(26, Math.max(1, parseInt(req.query.weeks, 10) || 6));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '')) return res.status(400).json({ error: 'Parametre from requis' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT g.week::date AS week,
+             COUNT(s.id) FILTER (WHERE s.shift_type <> 'repos') AS total,
+             COUNT(s.id) FILTER (WHERE s.shift_type <> 'repos' AND s.is_published) AS published
+      FROM generate_series($1::date, $1::date + ($2::int - 1) * INTERVAL '7 days', INTERVAL '7 days') AS g(week)
+      LEFT JOIN schedules s ON s.work_date >= g.week::date AND s.work_date < g.week::date + 7
+      GROUP BY g.week ORDER BY g.week`, [from, weeks]);
+    res.json(rows.map(r => ({ week: formatDate(r.week), total: parseInt(r.total, 10), published: parseInt(r.published, 10) })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/schedules/publish  body: { week: lundi, weeks: nombre de semaines (1 par defaut) }
+// Rend visibles aux salaries les creneaux de la periode, puis previent les salaries concernes (un seul message)
 router.post('/publish', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
   const { week } = req.body;
+  const weeks = Math.min(12, Math.max(1, parseInt(req.body.weeks, 10) || 1));
   if (!week) return res.status(400).json({ error: 'Parametre week requis' });
   try {
     const toNotify = await pool.query(`
       SELECT s.*, e.email, e.first_name, e.last_name
       FROM schedules s JOIN employees e ON s.employee_id = e.id
-      WHERE s.work_date >= $1::date AND s.work_date < $1::date + INTERVAL '7 days'
+      WHERE s.work_date >= $1::date AND s.work_date < $1::date + $2::int * INTERVAL '7 days'
         AND s.is_published = false AND e.email IS NOT NULL
         AND e.email NOT LIKE '%@temp.fr' -- equipiers temporaires : adresse fictive
-    `, [week]);
+    `, [week, weeks]);
     const result = await pool.query(`
       UPDATE schedules SET is_published = true
-      WHERE work_date >= $1::date AND work_date < $1::date + INTERVAL '7 days'
+      WHERE work_date >= $1::date AND work_date < $1::date + $2::int * INTERVAL '7 days'
       AND is_published = false RETURNING id, employee_id
-    `, [week]);
-    const [y, mo, d] = String(week).slice(0, 10).split('-');
-    notifyEmployees(result.rows.map(r => r.employee_id), { title: 'Planning publié', body: 'Votre planning de la semaine du ' + d + '/' + mo + ' est disponible', tag: 'planning-' + week });
+    `, [week, weeks]);
+    const [, mo, d] = String(week).slice(0, 10).split('-');
+    const end = new Date(String(week).slice(0, 10) + 'T12:00:00Z'); end.setUTCDate(end.getUTCDate() + 7 * weeks - 1);
+    const endFr = String(end.getUTCDate()).padStart(2, '0') + '/' + String(end.getUTCMonth() + 1).padStart(2, '0');
+    notifyEmployees([...new Set(result.rows.map(r => r.employee_id))], {
+      title: 'Planning publié',
+      body: weeks > 1 ? 'Votre planning du ' + d + '/' + mo + ' au ' + endFr + ' est disponible' : 'Votre planning de la semaine du ' + d + '/' + mo + ' est disponible',
+      tag: 'planning-' + week,
+    });
     const byEmp = {};
     toNotify.rows.forEach(s => {
+      if (s.shift_type === 'repos') return;
       if (!byEmp[s.employee_id]) byEmp[s.employee_id] = { email: s.email, name: s.first_name + ' ' + s.last_name, count: 0 };
       byEmp[s.employee_id].count++;
     });
     Object.values(byEmp).forEach(emp => {
-      sendPlanningPublished({ to: emp.email, employeeName: emp.name, weekStart: week, shiftsCount: emp.count });
+      sendPlanningPublished({ to: emp.email, employeeName: emp.name, weekStart: week, shiftsCount: emp.count, weeks });
     });
     res.json({ success: true, published: result.rowCount, notified: Object.keys(byEmp).length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/schedules/unpublish  body: { week } -> la semaine redevient un brouillon (invisible pour les salaries), sans message
+router.post('/unpublish', managerOnly, requirePerm('planning_modifier'), async (req, res) => {
+  const { week } = req.body;
+  if (!week) return res.status(400).json({ error: 'Parametre week requis' });
+  try {
+    const result = await pool.query(`
+      UPDATE schedules SET is_published = false
+      WHERE work_date >= $1::date AND work_date < $1::date + INTERVAL '7 days' AND is_published = true
+      RETURNING id`, [week]);
+    res.json({ success: true, unpublished: result.rowCount });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
