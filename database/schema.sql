@@ -1,4 +1,4 @@
--- Structure Planning HPA, generee le 13/10/2026 22:02
+-- Structure Planning HPA, generee le 16/10/2026 17:20
 -- A executer sur un projet Supabase NEUF (SQL Editor), avant la restauration des donnees.
 -- Apres execution : definir le mot de passe du role planning_app (ALTER ROLE planning_app PASSWORD ...)
 -- et mettre a jour DATABASE_URL du backend.
@@ -153,7 +153,8 @@ CREATE TABLE IF NOT EXISTS public.employees (
   cp_init_date date,
   cp_init_n1 numeric(6,2),
   cp_init_n numeric(6,2),
-  archived_at timestamp with time zone
+  archived_at timestamp with time zone,
+  caution_lien_envoye_at timestamp with time zone
 );
 
 CREATE TABLE IF NOT EXISTS public.mandatory_doc_signatures (
@@ -1267,7 +1268,7 @@ BEGIN
     NEW.contrat_signe_debut := OLD.contrat_signe_debut; NEW.contrat_signe_doc := OLD.contrat_signe_doc;
     NEW.logement_pieces := OLD.logement_pieces; NEW.caution_recue_at := OLD.caution_recue_at; NEW.nss_enc := OLD.nss_enc;
     NEW.cp_init_date := OLD.cp_init_date; NEW.cp_init_n1 := OLD.cp_init_n1; NEW.cp_init_n := OLD.cp_init_n;
-    NEW.archived_at := OLD.archived_at;
+    NEW.archived_at := OLD.archived_at; NEW.caution_lien_envoye_at := OLD.caution_lien_envoye_at;
   END IF;
   RETURN NEW;
 END;
@@ -1683,7 +1684,7 @@ CREATE POLICY "Acces abonnements" ON public.push_subscriptions AS PERMISSIVE FOR
 CREATE POLICY "Voit ses appareils" ON public.push_subscriptions AS PERMISSIVE FOR SELECT TO authenticated USING ((user_id = auth.uid()));
 CREATE POLICY "Acces schedules" ON public.schedules AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Manager" ON public.schedules AS PERMISSIVE FOR ALL TO authenticated USING (is_manager()) WITH CHECK (is_manager());
-CREATE POLICY "Salarie voit ses creneaux" ON public.schedules AS PERMISSIVE FOR SELECT TO authenticated USING ((employee_id = my_employee_id()));
+CREATE POLICY "Salarie voit ses creneaux" ON public.schedules AS PERMISSIVE FOR SELECT TO authenticated USING (((employee_id = my_employee_id()) AND is_published));
 CREATE POLICY "Admin lecture" ON public.sensitive_access_log AS PERMISSIVE FOR SELECT TO authenticated USING (is_admin());
 CREATE POLICY "Serveur uniquement" ON public.server_secrets AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
 CREATE POLICY "Acces timeclock" ON public.timeclock AS PERMISSIVE FOR ALL TO planning_app USING (true) WITH CHECK (true);
